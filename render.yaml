@@ -1,11 +1,11 @@
 services:
   - type: web
     name: quotationapi-v2
-    runtime: dotnet
+    runtime: docker
     plan: free
     rootDir: .
-    buildCommand: dotnet restore && dotnet publish -c Release -o out
-    startCommand: dotnet out/QuotationAPI.V2.dll
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     autoDeploy: false
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
