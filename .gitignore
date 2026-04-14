@@ -6,3 +6,10 @@ obj/
 *.cache
 *.pdb
 *.log
+publish/
+_temp_build*/
+artifacts/
+*.db-shm
+*.db-wal
+api-dev.log
+api-dev.err.log
