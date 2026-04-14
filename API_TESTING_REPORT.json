@@ -1,0 +1,82 @@
+﻿{
+    "positive":  [
+                     {
+                         "test":  "Create customer master",
+                         "passed":  true,
+                         "details":  "CustomerId=cust-3"
+                     },
+                     {
+                         "test":  "Set initial balances",
+                         "passed":  true,
+                         "details":  "cash=10000, bank=5000"
+                     },
+                     {
+                         "test":  "Create income entry",
+                         "passed":  true,
+                         "details":  "IncomeId=4776e1a1-fd89-4555-9405-642446ae21dc"
+                     },
+                     {
+                         "test":  "Create expense entry",
+                         "passed":  true,
+                         "details":  "ExpenseId=0a6548a4-9f40-4a58-8ec8-a16d46af662e"
+                     },
+                     {
+                         "test":  "Create cash transfer",
+                         "passed":  true,
+                         "details":  "TransferId=c1a25819-e255-4012-a283-41adacdcae36"
+                     },
+                     {
+                         "test":  "Create material price",
+                         "passed":  true,
+                         "details":  "MaterialPriceId=96eff2bc61e840b6a3400e7387d6b99d"
+                     },
+                     {
+                         "test":  "Create waste sale",
+                         "passed":  true,
+                         "details":  "WasteSaleId=b3f10fcd-f3b7-4124-94d6-37627a500fe6"
+                     },
+                     {
+                         "test":  "Create employee",
+                         "passed":  true,
+                         "details":  "EmployeeId=e0288c27-5fca-4e7a-9039-650407152ecc"
+                     },
+                     {
+                         "test":  "Create holiday",
+                         "passed":  true,
+                         "details":  "HolidayId=3a2f5bb3-8838-4af8-a5c2-624346d24e46"
+                     },
+                     {
+                         "test":  "Create salary master",
+                         "passed":  true,
+                         "details":  "SalaryMasterId=0f4b13d5-86b2-447a-9b2a-c15113c28232"
+                     },
+                     {
+                         "test":  "Create salary advance",
+                         "passed":  true,
+                         "details":  "SalaryAdvanceId=cae36363-2e60-407c-af9e-0a2c8772b7a9"
+                     },
+                     {
+                         "test":  "Read-back validation",
+                         "passed":  true,
+                         "details":  "customers=3 income=3 expense=3 inventory=3 employees=3"
+                     }
+                 ],
+    "negative":  [
+                     {
+                         "test":  "Reset accounts without confirm should fail",
+                         "passed":  true,
+                         "details":  "{\"message\":\"Append ?confirm=YES to the request to confirm data reset.\"}"
+                     },
+                     {
+                         "test":  "Cash transfer with same accounts should fail",
+                         "passed":  true,
+                         "details":  "{\"message\":\"From and To accounts must be opposite bank/cash accounts.\"}"
+                     },
+                     {
+                         "test":  "Zoho pull without config should fail",
+                         "passed":  true,
+                         "details":  "{\"message\":\"ZohoBooks configuration missing. Set ZohoBooks:AccessToken and ZohoBooks:OrganizationId.\"}"
+                     }
+                 ],
+    "timestamp":  "2026-04-14T12:18:06"
+}

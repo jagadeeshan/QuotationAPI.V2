@@ -1,0 +1,342 @@
+[
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Auth",
+    "caseType": "Positive",
+    "scenario": "Register user",
+    "endpoint": "POST /api/auth/register",
+    "uiScreen": "Auth > Register",
+    "impactedModules": "Auth, Role-based access",
+    "impactExplanation": "Creates a user account and role mapping used for application access.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "username": "user_RUN-20260415032118"
+    },
+    "responsePreview": "{\"accessToken\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJkMGUwYTk5OC1jMWFiLTQ4ZmUtOWM3NS1kMDQ1YzM4YjU0ZWQiLCJ1bmlxdWVfbmFtZSI6InVzZXJfUlVOLTIwMjYwNDE1MDMyMTE4IiwiZW1haWwiOiJ1c2VyX1JVTi0yMDI2MDQxNTAzMjExOEBleGFtcGxlLmNvbSIsImZpcnN0TmFtZSI6IkFwaSIsImxhc3ROYW1lIjoiVGVzdGVyIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiVXNlciIsImV4cCI6MTc3NjIwNzA3OCwiaXNzIjoiUXVvdGF0aW9uQVBJLlYyIiwiYXVkIjoiUXVvdGF0aW9uQXBwIn0.ezEXL8yqbs53ei9rcJJ52F390DkDpbvQpJYOR9hXVZg\",\"refreshToken\":\"mInyIAGeHk2viaXXLfRwHA==d6129c1ce6d24429ac4010b64ae26d8f\",\"expiresIn\":3600,\"user\":{\"id\":\"d0e0a998-c1ab-48fe-9c75-d045c38b54ed\",\"username\":\"user_RUN-20260415032118\",\"email\":\"user_RUN-20260415032118@example.com\",\"firstName\":\"Api\",\"lastName\":\"Tester\",\"roles\":[{\"id\":\"a27c7ee7-e56d-4be6-965a-c1472d964211\",\"name\":\"User\",\"description\":\"Standard user\"}],\"permissions\":[\"quotation.read\",\"accounts.read\"],\"isActive\":true,\"lastLogin\":\"2026-04-14T21:51:18.3685991Z\"}}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Auth",
+    "caseType": "Negative",
+    "scenario": "Login with invalid password",
+    "endpoint": "POST /api/auth/login",
+    "uiScreen": "Auth > Login",
+    "impactedModules": "Auth",
+    "impactExplanation": "Rejects invalid credential login and prevents unauthorized access.",
+    "expectedStatuses": "401",
+    "actualStatus": 401,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"\\r\\n{\\r\\n  \\\"message\\\": \\\"Invalid username or password\\\"\\r\\n}\""
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Admin",
+    "caseType": "Positive",
+    "scenario": "Create admin user group",
+    "endpoint": "POST /api/admin-module/user-groups",
+    "uiScreen": "Admin > User Groups",
+    "impactedModules": "Admin permissions matrix",
+    "impactExplanation": "Creates a group used for feature-permission assignments and audit trails.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "groupId": "group-7144d78f"
+    },
+    "responsePreview": "{\"id\":\"group-7144d78f\",\"name\":\"Group RUN-20260415032118\",\"description\":\"API test admin group\",\"permissions\":[\"quotation.read\",\"accounts.read\"],\"parentGroup\":null,\"members\":[]}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Admin",
+    "caseType": "Negative",
+    "scenario": "Fetch unknown admin user",
+    "endpoint": "GET /api/admin-module/users/{id}",
+    "uiScreen": "Admin > User Management",
+    "impactedModules": "Admin",
+    "impactExplanation": "Unknown admin user id should return not found without mutating admin state.",
+    "expectedStatuses": "404",
+    "actualStatus": 404,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"{\\\"type\\\":\\\"https://tools.ietf.org/html/rfc9110#section-15.5.5\\\",\\\"title\\\":\\\"Not Found\\\",\\\"status\\\":404,\\\"traceId\\\":\\\"00-922a50bd12c363631fab5f2a689c54e3-b00c8e45f4105fd0-00\\\"}\""
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Customer",
+    "caseType": "Positive",
+    "scenario": "Create customer master",
+    "endpoint": "POST /api/customer-masters",
+    "uiScreen": "Customer > Customer List",
+    "impactedModules": "Quotation, Invoice, Sales, Accounts",
+    "impactExplanation": "Created customer appears in master list and becomes selectable in dependent forms.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "customerId": "cust-4"
+    },
+    "responsePreview": "{\"id\":\"cust-4\",\"code\":\"CUST004\",\"name\":\"Customer RUN-20260415032118\",\"phone\":\"9876543210\",\"email\":\"customer.RUN-20260415032118@example.com\",\"address\":\"Test Address\",\"gstNumber\":null,\"customerType\":\"Retail\",\"status\":\"Active\",\"openingBalance\":0,\"createdDate\":\"2026-04-14T21:51:18.6980661Z\",\"updatedDate\":\"2026-04-14T21:51:18.6980997Z\",\"isDeleted\":false}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Customer",
+    "caseType": "Negative",
+    "scenario": "GST lookup invalid number",
+    "endpoint": "GET /api/customer-masters/gst/lookup",
+    "uiScreen": "Customer > GST Lookup",
+    "impactedModules": "Customer",
+    "impactExplanation": "Invalid GST should be rejected and no customer data should be modified.",
+    "expectedStatuses": "400",
+    "actualStatus": 400,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"\\r\\n{\\r\\n  \\\"message\\\": \\\"Please enter a valid GST number.\\\"\\r\\n}\""
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Accounts",
+    "caseType": "Positive",
+    "scenario": "Create purchase voucher",
+    "endpoint": "POST /api/accounts/ledger/purchase-sales",
+    "uiScreen": "Accounts > Purchase/Sales Ledger",
+    "impactedModules": "Inventory, Tax Payment, Financial Year Performance",
+    "impactExplanation": "Purchase voucher can be linked by inventory stock entries and contributes to tax calculations.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "voucherNumber": "PUR-20260414-0003"
+    },
+    "responsePreview": "{\"voucherNumber\":\"PUR-20260414-0003\",\"transactionType\":\"Purchase\",\"customerId\":\"cust-4\",\"partyName\":\"Customer RUN-20260415032118\",\"paymentType\":\"bank\",\"amount\":15000,\"totalAmountPaid\":15000,\"taxPercent\":18,\"taxAmount\":2288.14,\"voucherDate\":\"2026-04-15\",\"isDeleted\":false}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Inventory",
+    "caseType": "Positive",
+    "scenario": "Create reel stock with purchase linkage",
+    "endpoint": "POST /api/inventory/reel-stocks",
+    "uiScreen": "Inventory > Add Reel Stock",
+    "impactedModules": "Inventory Dashboard, Material Prices",
+    "impactExplanation": "Stock row is added and auto-upserts material price reference data for pricing lookup.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "reelId": "ff764116e74d46e1a7ea71b26f5dc72f",
+      "reelNumber": "RL-102"
+    },
+    "responsePreview": "{\"id\":\"ff764116e74d46e1a7ea71b26f5dc72f\",\"reelNumber\":\"RL-102\",\"stockType\":\"reel\",\"material\":\"Kraft\",\"rollSize\":\"40-inch\",\"gsm\":120,\"bf\":18,\"quantity\":10,\"unitCost\":65,\"weight\":100,\"amount\":6500,\"purchaseVoucherNumber\":\"PUR-20260414-0003\",\"dealerName\":\"Customer RUN-20260415032118\",\"purchaseInvoiceNumber\":\"PI-RUN-20260415032118\",\"receivedDate\":\"2026-04-15\",\"remarks\":\"API seed stock\",\"taxPercent\":18,\"taxAmount\":1170,\"finalAmount\":7670,\"currentStock\":100,\"reorderLevel\":20,\"unit\":\"kg\",\"lastUpdated\":\"2026-04-14T21:51:18.9059753Z\",\"status\":\"active\",\"isDeleted\":false}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Inventory",
+    "caseType": "Negative",
+    "scenario": "Create stock without purchase voucher",
+    "endpoint": "POST /api/inventory/reel-stocks",
+    "uiScreen": "Inventory > Add Reel Stock",
+    "impactedModules": "Inventory",
+    "impactExplanation": "Request must fail; no invalid stock row should be created.",
+    "expectedStatuses": "400",
+    "actualStatus": 400,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"\\r\\n{\\r\\n  \\\"message\\\": \\\"Purchase voucher number is required for all stock entries.\\\"\\r\\n}\""
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Expense",
+    "caseType": "Positive",
+    "scenario": "Create approved expense record",
+    "endpoint": "POST /api/expense-records",
+    "uiScreen": "Expense > Expense Form/List",
+    "impactedModules": "Accounts Dashboard, Expense Ledger",
+    "impactExplanation": "Approved expense creates/updates linked expense-entry and reduces matching balance type.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "expenseRecordId": "EXP-03a2f17c"
+    },
+    "responsePreview": "{\"id\":\"EXP-03a2f17c\",\"expenseNumber\":\"EXP-2026-004\",\"category\":\"Transport\",\"amount\":950,\"expenseDate\":\"2026-04-15\",\"paidBy\":\"tester\",\"paymentMethod\":\"cash\",\"remarks\":\"Seed expense record\",\"status\":\"approved\",\"createdAt\":\"2026-04-14T21:51:18.9977775Z\",\"updatedAt\":\"2026-04-14T21:51:18.9977775Z\",\"isDeleted\":false}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Expense",
+    "caseType": "Negative",
+    "scenario": "Get unknown expense record",
+    "endpoint": "GET /api/expense-records/{id}",
+    "uiScreen": "Expense > Expense List",
+    "impactedModules": "Expense",
+    "impactExplanation": "Unknown record should return not found and not alter accounting tables.",
+    "expectedStatuses": "404",
+    "actualStatus": 404,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"{\\\"type\\\":\\\"https://tools.ietf.org/html/rfc9110#section-15.5.5\\\",\\\"title\\\":\\\"Not Found\\\",\\\"status\\\":404,\\\"traceId\\\":\\\"00-0986d9681ede0755c0499daaadf25ba8-dc6cd0f9f9619c70-00\\\"}\""
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Sales",
+    "caseType": "Positive",
+    "scenario": "Create waste sale",
+    "endpoint": "POST /api/sales/waste",
+    "uiScreen": "Sales > Waste Sale",
+    "impactedModules": "Accounts Customer Outstanding, Sales Summary",
+    "impactExplanation": "Waste sale creates revenue record and auto-creates customer outstanding.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "wasteSaleId": "55379ef8-cf02-4cb0-a0e7-b00217e8416a",
+      "outstandingId": "83765de8-1d28-44b0-b43d-14b101158a46"
+    },
+    "responsePreview": "{\"id\":\"55379ef8-cf02-4cb0-a0e7-b00217e8416a\",\"customerId\":\"cust-4\",\"customerName\":\"Customer RUN-20260415032118\",\"weightKg\":250,\"unitPrice\":12,\"totalAmount\":3000,\"description\":\"Seed waste sale\",\"saleDate\":\"2026-04-15\",\"status\":\"active\",\"createdDate\":\"2026-04-14T21:51:19.0550613Z\",\"updatedDate\":null,\"outstandingId\":\"83765de8-1d28-44b0-b43d-14b101158a46\",\"isDeleted\":false}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Sales",
+    "caseType": "Negative",
+    "scenario": "Create roll sale without customer name",
+    "endpoint": "POST /api/sales/roll",
+    "uiScreen": "Sales > Roll Sale",
+    "impactedModules": "Sales",
+    "impactExplanation": "Missing required customer name must fail validation.",
+    "expectedStatuses": "400",
+    "actualStatus": 400,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"{\\\"type\\\":\\\"https://tools.ietf.org/html/rfc9110#section-15.5.1\\\",\\\"title\\\":\\\"One or more validation errors occurred.\\\",\\\"status\\\":400,\\\"errors\\\":{\\\"CustomerName\\\":[\\\"The CustomerName field is required.\\\"]},\\\"traceId\\\":\\\"00-9403618e28f2ef96d1f166b0cb21d802-23d80ff5642b0aa5-00\\\"}\""
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Employee",
+    "caseType": "Positive",
+    "scenario": "Create employee",
+    "endpoint": "POST /api/employees",
+    "uiScreen": "Employee > Employee Master",
+    "impactedModules": "Attendance, Salary, Payslip",
+    "impactExplanation": "Employee becomes available for attendance tracking and salary calculations.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "employeeId": "33d07f9a-e213-4955-9f29-eb0f539a7155",
+      "employeeCode": "EMP000004"
+    },
+    "responsePreview": "{\"id\":\"33d07f9a-e213-4955-9f29-eb0f539a7155\",\"employeeCode\":\"EMP000004\",\"fullName\":\"Employee RUN-20260415032118\",\"phone\":\"9000000001\",\"designation\":\"Operator\",\"joiningDate\":\"2026-04-15\",\"monthlySalary\":25000,\"status\":\"active\",\"department\":\"Production\",\"isDeleted\":false}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Employee",
+    "caseType": "Negative",
+    "scenario": "Attendance before joining date",
+    "endpoint": "POST /api/employees/attendance",
+    "uiScreen": "Employee > Attendance",
+    "impactedModules": "Attendance, Salary",
+    "impactExplanation": "Invalid attendance must be rejected to prevent salary distortion.",
+    "expectedStatuses": "400",
+    "actualStatus": 400,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"Attendance before joining date is not allowed.\""
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Quotation",
+    "caseType": "Positive",
+    "scenario": "Create quotation calc record",
+    "endpoint": "POST /api/quotation-calc-records",
+    "uiScreen": "Quotation > Quotation Form/List",
+    "impactedModules": "Items, Analytics",
+    "impactExplanation": "Quotation record contributes to item aggregation and quotation analytics.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "quotationCalcId": 1032
+    },
+    "responsePreview": "{\"id\":1032,\"createdAt\":\"2026-04-14T21:51:19.3142153Z\",\"updatedAt\":\"2026-04-14T21:51:19.3142453Z\",\"companyName\":\"Company RUN-20260415032118\",\"description\":\"Quotation calc seed\",\"amount\":25000,\"dataJson\":\"{\\\"item\\\":{\\\"itemName\\\":\\\"Box A\\\",\\\"customerName\\\":\\\"Customer\\\",\\\"itemId\\\":462400853,\\\"itemKey\\\":\\\"name:customer|item:box a\\\"},\\\"price\\\":{\\\"actualAmount\\\":25000,\\\"profit\\\":3500},\\\"expense\\\":{\\\"includeRent\\\":true,\\\"contractLabour\\\":0}}\",\"isDeleted\":false}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Quotation",
+    "caseType": "Negative",
+    "scenario": "Create quotation with invalid email",
+    "endpoint": "POST /api/quotations",
+    "uiScreen": "Quotation > Quotation Form",
+    "impactedModules": "Quotation",
+    "impactExplanation": "Validation should prevent invalid quotation persistence.",
+    "expectedStatuses": "400",
+    "actualStatus": 400,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"{\\\"type\\\":\\\"https://tools.ietf.org/html/rfc9110#section-15.5.1\\\",\\\"title\\\":\\\"One or more validation errors occurred.\\\",\\\"status\\\":400,\\\"errors\\\":{\\\"Email\\\":[\\\"The Email field is not a valid e-mail address.\\\"]},\\\"traceId\\\":\\\"00-352db18ca5b883074e8c77f624355a75-6d7d9a1bba9c9dc2-00\\\"}\""
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Invoice",
+    "caseType": "Positive",
+    "scenario": "Create invoice calc record",
+    "endpoint": "POST /api/invoice-calc-records",
+    "uiScreen": "Invoice > Invoice Form/List",
+    "impactedModules": "Items, Financial Year Performance",
+    "impactExplanation": "Invoice record contributes to order totals, profit, and FY reporting.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "invoiceCalcId": 1021
+    },
+    "responsePreview": "{\"id\":1021,\"createdAt\":\"2026-04-14T21:51:19.3665613Z\",\"updatedAt\":\"2026-04-14T21:51:19.366591Z\",\"companyName\":\"Company RUN-20260415032118\",\"description\":\"Invoice calc seed\",\"amount\":27000,\"dataJson\":\"{\\\"item\\\":{\\\"itemName\\\":\\\"Order A\\\",\\\"customerName\\\":\\\"Customer\\\",\\\"itemId\\\":1031515054,\\\"itemKey\\\":\\\"name:customer|item:order a\\\"},\\\"price\\\":{\\\"actualAmount\\\":27000,\\\"profit\\\":4200},\\\"expense\\\":{\\\"includeRent\\\":true,\\\"contractLabour\\\":0}}\",\"isDeleted\":false}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "Invoice",
+    "caseType": "Negative",
+    "scenario": "Get unknown invoice calc record",
+    "endpoint": "GET /api/invoice-calc-records/{id}",
+    "uiScreen": "Invoice > Invoice List",
+    "impactedModules": "Invoice",
+    "impactExplanation": "Unknown invoice ID should return not found without side effects.",
+    "expectedStatuses": "404",
+    "actualStatus": 404,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"{\\\"type\\\":\\\"https://tools.ietf.org/html/rfc9110#section-15.5.5\\\",\\\"title\\\":\\\"Not Found\\\",\\\"status\\\":404,\\\"traceId\\\":\\\"00-4ae592308444dc3d1673e83799703bf4-9d6394ea877483a1-00\\\"}\""
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "LOV",
+    "caseType": "Positive",
+    "scenario": "Create LOV item",
+    "endpoint": "POST /api/list-of-values",
+    "uiScreen": "Admin > Expense Category Management, Quotation/Invoice/Expense dropdowns",
+    "impactedModules": "Expense, Quotation, Invoice, Sales",
+    "impactExplanation": "LOV insertion updates selectable dropdown values across dependent forms.",
+    "expectedStatuses": "200,201",
+    "actualStatus": 200,
+    "passed": true,
+    "insertedKeys": {
+      "lovId": 195
+    },
+    "responsePreview": "{\"id\":195,\"parentname\":\"expensecategory\",\"parentvalue\":null,\"name\":\"seed-lov-RUN-20260415032118\",\"value\":1,\"description\":\"seed lov\",\"itemtype\":\"value\",\"displayorder\":1,\"isactive\":\"Y\",\"createdby\":\"system\",\"updatedby\":\"system\",\"createddt\":\"2026-04-14T21:51:19.4091056Z\",\"updateddt\":\"2026-04-14T21:51:19.4091056Z\",\"isDeleted\":false}"
+  },
+  {
+    "runTag": "RUN-20260415032118",
+    "module": "LOV",
+    "caseType": "Negative",
+    "scenario": "Create blocked placeholder LOV value",
+    "endpoint": "POST /api/list-of-values",
+    "uiScreen": "Admin > Expense Category Management",
+    "impactedModules": "LOV",
+    "impactExplanation": "Protected placeholder key must be rejected.",
+    "expectedStatuses": "400",
+    "actualStatus": 400,
+    "passed": true,
+    "insertedKeys": {},
+    "responsePreview": "\"\\r\\n{\\r\\n  \\\"message\\\": \\\"Invalid LOV value name.\\\"\\r\\n}\""
+  }
+]

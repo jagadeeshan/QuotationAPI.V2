@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang='en'>
+<head>
+  <meta charset='utf-8' />
+  <meta name='viewport' content='width=device-width, initial-scale=1' />
+  <title>Positive/Negative API Impact Report</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 24px; color: #1d2630; background: #f7fafc; }
+    h1 { margin-bottom: 4px; }
+    .meta { color: #4b5563; margin-bottom: 20px; }
+    .chips { display: flex; gap: 12px; margin-bottom: 20px; }
+    .chip { background: #fff; border: 1px solid #d1d5db; border-radius: 10px; padding: 10px 12px; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; }
+    th, td { border: 1px solid #e5e7eb; padding: 10px; vertical-align: top; font-size: 13px; }
+    th { background: #f3f4f6; text-align: left; }
+    .pass { color: #166534; font-weight: 700; }
+    .fail { color: #991b1b; font-weight: 700; }
+    code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Positive and Negative Test Data Impact Report</h1>
+  <p class='meta'>RunTag: RUN-20260415032118 | Generated: 2026-04-15 03:21:19</p>
+  <div class='chips'>
+    <div class='chip'>Total Cases: 21</div>
+    <div class='chip'>Passed: 21</div>
+    <div class='chip'>Failed: 0</div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Module</th>
+        <th>Case</th>
+        <th>Scenario</th>
+        <th>API Endpoint</th>
+        <th>UI Screen</th>
+        <th>Modules Impacted</th>
+        <th>Impact Explanation</th>
+        <th>Expected Status</th>
+        <th>Actual Status</th>
+        <th>Result</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Auth</td><td>Positive</td><td>Register user</td><td><code>POST /api/auth/register</code></td><td>Auth > Register</td><td>Auth, Role-based access</td><td>Creates a user account and role mapping used for application access.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Auth</td><td>Negative</td><td>Login with invalid password</td><td><code>POST /api/auth/login</code></td><td>Auth > Login</td><td>Auth</td><td>Rejects invalid credential login and prevents unauthorized access.</td><td>401</td><td>401</td><td class='pass'>PASS</td></tr>
+<tr><td>Admin</td><td>Positive</td><td>Create admin user group</td><td><code>POST /api/admin-module/user-groups</code></td><td>Admin > User Groups</td><td>Admin permissions matrix</td><td>Creates a group used for feature-permission assignments and audit trails.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Admin</td><td>Negative</td><td>Fetch unknown admin user</td><td><code>GET /api/admin-module/users/{id}</code></td><td>Admin > User Management</td><td>Admin</td><td>Unknown admin user id should return not found without mutating admin state.</td><td>404</td><td>404</td><td class='pass'>PASS</td></tr>
+<tr><td>Customer</td><td>Positive</td><td>Create customer master</td><td><code>POST /api/customer-masters</code></td><td>Customer > Customer List</td><td>Quotation, Invoice, Sales, Accounts</td><td>Created customer appears in master list and becomes selectable in dependent forms.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Customer</td><td>Negative</td><td>GST lookup invalid number</td><td><code>GET /api/customer-masters/gst/lookup</code></td><td>Customer > GST Lookup</td><td>Customer</td><td>Invalid GST should be rejected and no customer data should be modified.</td><td>400</td><td>400</td><td class='pass'>PASS</td></tr>
+<tr><td>Accounts</td><td>Positive</td><td>Create purchase voucher</td><td><code>POST /api/accounts/ledger/purchase-sales</code></td><td>Accounts > Purchase/Sales Ledger</td><td>Inventory, Tax Payment, Financial Year Performance</td><td>Purchase voucher can be linked by inventory stock entries and contributes to tax calculations.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Inventory</td><td>Positive</td><td>Create reel stock with purchase linkage</td><td><code>POST /api/inventory/reel-stocks</code></td><td>Inventory > Add Reel Stock</td><td>Inventory Dashboard, Material Prices</td><td>Stock row is added and auto-upserts material price reference data for pricing lookup.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Inventory</td><td>Negative</td><td>Create stock without purchase voucher</td><td><code>POST /api/inventory/reel-stocks</code></td><td>Inventory > Add Reel Stock</td><td>Inventory</td><td>Request must fail; no invalid stock row should be created.</td><td>400</td><td>400</td><td class='pass'>PASS</td></tr>
+<tr><td>Expense</td><td>Positive</td><td>Create approved expense record</td><td><code>POST /api/expense-records</code></td><td>Expense > Expense Form/List</td><td>Accounts Dashboard, Expense Ledger</td><td>Approved expense creates/updates linked expense-entry and reduces matching balance type.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Expense</td><td>Negative</td><td>Get unknown expense record</td><td><code>GET /api/expense-records/{id}</code></td><td>Expense > Expense List</td><td>Expense</td><td>Unknown record should return not found and not alter accounting tables.</td><td>404</td><td>404</td><td class='pass'>PASS</td></tr>
+<tr><td>Sales</td><td>Positive</td><td>Create waste sale</td><td><code>POST /api/sales/waste</code></td><td>Sales > Waste Sale</td><td>Accounts Customer Outstanding, Sales Summary</td><td>Waste sale creates revenue record and auto-creates customer outstanding.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Sales</td><td>Negative</td><td>Create roll sale without customer name</td><td><code>POST /api/sales/roll</code></td><td>Sales > Roll Sale</td><td>Sales</td><td>Missing required customer name must fail validation.</td><td>400</td><td>400</td><td class='pass'>PASS</td></tr>
+<tr><td>Employee</td><td>Positive</td><td>Create employee</td><td><code>POST /api/employees</code></td><td>Employee > Employee Master</td><td>Attendance, Salary, Payslip</td><td>Employee becomes available for attendance tracking and salary calculations.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Employee</td><td>Negative</td><td>Attendance before joining date</td><td><code>POST /api/employees/attendance</code></td><td>Employee > Attendance</td><td>Attendance, Salary</td><td>Invalid attendance must be rejected to prevent salary distortion.</td><td>400</td><td>400</td><td class='pass'>PASS</td></tr>
+<tr><td>Quotation</td><td>Positive</td><td>Create quotation calc record</td><td><code>POST /api/quotation-calc-records</code></td><td>Quotation > Quotation Form/List</td><td>Items, Analytics</td><td>Quotation record contributes to item aggregation and quotation analytics.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Quotation</td><td>Negative</td><td>Create quotation with invalid email</td><td><code>POST /api/quotations</code></td><td>Quotation > Quotation Form</td><td>Quotation</td><td>Validation should prevent invalid quotation persistence.</td><td>400</td><td>400</td><td class='pass'>PASS</td></tr>
+<tr><td>Invoice</td><td>Positive</td><td>Create invoice calc record</td><td><code>POST /api/invoice-calc-records</code></td><td>Invoice > Invoice Form/List</td><td>Items, Financial Year Performance</td><td>Invoice record contributes to order totals, profit, and FY reporting.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>Invoice</td><td>Negative</td><td>Get unknown invoice calc record</td><td><code>GET /api/invoice-calc-records/{id}</code></td><td>Invoice > Invoice List</td><td>Invoice</td><td>Unknown invoice ID should return not found without side effects.</td><td>404</td><td>404</td><td class='pass'>PASS</td></tr>
+<tr><td>LOV</td><td>Positive</td><td>Create LOV item</td><td><code>POST /api/list-of-values</code></td><td>Admin > Expense Category Management, Quotation/Invoice/Expense dropdowns</td><td>Expense, Quotation, Invoice, Sales</td><td>LOV insertion updates selectable dropdown values across dependent forms.</td><td>200,201</td><td>200</td><td class='pass'>PASS</td></tr>
+<tr><td>LOV</td><td>Negative</td><td>Create blocked placeholder LOV value</td><td><code>POST /api/list-of-values</code></td><td>Admin > Expense Category Management</td><td>LOV</td><td>Protected placeholder key must be rejected.</td><td>400</td><td>400</td><td class='pass'>PASS</td></tr>
+    </tbody>
+  </table>
+</body>
+</html>
