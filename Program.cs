@@ -20,7 +20,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<QuotationDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddHttpClient();
@@ -69,16 +69,18 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AngularCors", policy =>
     {
-        policy.WithOrigins(
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+            ?? new[]
+            {
                 "http://localhost",
                 "http://localhost:7500",
                 "http://localhost:7501",
                 "http://localhost:7502",
                 "http://localhost:4200",
-                "http://localhost:4210",
-                "http://192.168.0.138",
-                "http://192.168.0.138:7500",
-                "http://192.168.0.138:7501")
+                "http://localhost:4210"
+            };
+
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -291,7 +293,52 @@ static async Task EnsureExpenseCategoryLovDefaultsAsync(QuotationDbContext db)
 
 static async Task EnsureZohoBooksTablesAsync(QuotationDbContext db)
 {
-    const string sql = @"
+    var sql = db.Database.IsNpgsql()
+        ? """
+CREATE TABLE IF NOT EXISTS "ZohoCustomerRecords" (
+    "Id" VARCHAR(450) NOT NULL,
+    "CustomerName" TEXT NOT NULL,
+    "Email" TEXT NULL,
+    "Phone" TEXT NULL,
+    "OutstandingAmount" NUMERIC(18,4) NOT NULL,
+    "LastModifiedTimeUtc" TIMESTAMPTZ NULL,
+    "PulledAtUtc" TIMESTAMPTZ NOT NULL,
+    CONSTRAINT "PK_ZohoCustomerRecords" PRIMARY KEY ("Id")
+);
+
+CREATE TABLE IF NOT EXISTS "ZohoInvoiceRecords" (
+    "Id" VARCHAR(450) NOT NULL,
+    "CustomerId" TEXT NULL,
+    "CustomerName" TEXT NULL,
+    "InvoiceNumber" TEXT NULL,
+    "InvoiceDate" TIMESTAMPTZ NULL,
+    "DueDate" TIMESTAMPTZ NULL,
+    "Total" NUMERIC(18,4) NOT NULL,
+    "Balance" NUMERIC(18,4) NOT NULL,
+    "Status" TEXT NULL,
+    "LastModifiedTimeUtc" TIMESTAMPTZ NULL,
+    "PulledAtUtc" TIMESTAMPTZ NOT NULL,
+    CONSTRAINT "PK_ZohoInvoiceRecords" PRIMARY KEY ("Id")
+);
+
+CREATE TABLE IF NOT EXISTS "ZohoOutstandingRecords" (
+    "Id" VARCHAR(450) NOT NULL,
+    "CustomerName" TEXT NULL,
+    "OutstandingAmount" NUMERIC(18,4) NOT NULL,
+    "PulledAtUtc" TIMESTAMPTZ NOT NULL,
+    CONSTRAINT "PK_ZohoOutstandingRecords" PRIMARY KEY ("Id")
+);
+
+CREATE TABLE IF NOT EXISTS "ZohoSyncStates" (
+    "Id" INTEGER NOT NULL,
+    "LastCustomersSyncUtc" TIMESTAMPTZ NULL,
+    "LastInvoicesSyncUtc" TIMESTAMPTZ NULL,
+    "LastOutstandingSyncUtc" TIMESTAMPTZ NULL,
+    "UpdatedAtUtc" TIMESTAMPTZ NOT NULL,
+    CONSTRAINT "PK_ZohoSyncStates" PRIMARY KEY ("Id")
+);
+"""
+        : @"
 IF OBJECT_ID(N'[ZohoCustomerRecords]', N'U') IS NULL
 BEGIN
     CREATE TABLE [ZohoCustomerRecords] (

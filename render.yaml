@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: quotationapi-v2
+    runtime: dotnet
+    plan: free
+    rootDir: .
+    buildCommand: dotnet restore && dotnet publish -c Release -o out
+    startCommand: dotnet out/QuotationAPI.V2.dll
+    autoDeploy: false
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://0.0.0.0:$PORT
+      - key: ConnectionStrings__DefaultConnection
+        sync: false
+      - key: Jwt__Key
+        sync: false
+      - key: Jwt__Issuer
+        value: QuotationAPI.V2
+      - key: Jwt__Audience
+        value: QuotationApp
+      - key: Cors__AllowedOrigins__0
+        sync: false
+      - key: ZohoBooks__ClientId
+        sync: false
+      - key: ZohoBooks__ClientSecret
+        sync: false
+      - key: ZohoBooks__RefreshToken
+        sync: false
+      - key: ZohoBooks__OrganizationId
+        sync: false

@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Data.SqlClient;
+using Npgsql;
 using QuotationAPI.V2.Data;
 using QuotationAPI.V2.Models.Employee;
 
@@ -81,9 +81,9 @@ public class EmployeesController : ControllerBase
 
     private static bool IsUniqueConstraintViolation(DbUpdateException exception)
     {
-        if (exception.InnerException is SqlException sqlException)
+        if (exception.InnerException is PostgresException postgresException)
         {
-            return sqlException.Number is 2601 or 2627;
+            return postgresException.SqlState == "23505";
         }
 
         return false;
