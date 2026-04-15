@@ -11,15 +11,9 @@ services:
     envVars:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
-      - key: ASPNETCORE_URLS
-        value: http://0.0.0.0:$PORT
-      - key: ConnectionStrings__DefaultConnection
-        sync: false
       - key: Supabase__PoolerConnectionString
         sync: false
-      - key: SUPABASE_POOLER_CONNECTION_STRING
-        sync: false
-      - key: DATABASE_URL
+      - key: ConnectionStrings__DefaultConnection
         sync: false
       - key: Jwt__Key
         sync: false

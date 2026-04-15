@@ -13,9 +13,9 @@ RUN dotnet publish "QuotationAPI.V2.csproj" -c Release -o /app/publish /p:UseApp
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 
-# Render provides PORT dynamically. Bind Kestrel to all interfaces.
-ENV ASPNETCORE_URLS=http://0.0.0.0:$PORT
-
 COPY --from=build /app/publish .
 
-ENTRYPOINT ["dotnet", "QuotationAPI.V2.dll"]
+# Render provides PORT at runtime (default 10000).
+# Use shell-form CMD so $PORT is expanded at container start, NOT at build time.
+# ENTRYPOINT exec form cannot expand env vars; CMD shell form can.
+CMD dotnet QuotationAPI.V2.dll --urls "http://0.0.0.0:${PORT:-10000}"

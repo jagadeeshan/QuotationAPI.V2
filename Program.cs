@@ -97,14 +97,25 @@ if (!string.IsNullOrWhiteSpace(resolvedDatabaseConnection.ConnectionString))
 {
     var connectionInfo = new NpgsqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
     startupLogger.LogInformation(
-        "Using PostgreSQL connection source: {ConnectionSource}; Host: {Host}; Port: {Port}",
+        "Using PostgreSQL connection source: {ConnectionSource}; Host: {Host}; Port: {Port}; SSL: {SslMode}; MaxPool: {MaxPool}",
         resolvedDatabaseConnection.Source,
         connectionInfo.Host,
-        connectionInfo.Port);
+        connectionInfo.Port,
+        connectionInfo.SslMode,
+        connectionInfo.MaxPoolSize);
+
+    // Warn if the resolved host looks suspicious (empty, truncated, or has leftover env var syntax).
+    if (string.IsNullOrWhiteSpace(connectionInfo.Host) || connectionInfo.Host.Contains("$"))
+    {
+        startupLogger.LogError(
+            "SUSPICIOUS HOST DETECTED: '{Host}'. This may indicate Render expanded a $VARIABLE in the connection string env var. "
+            + "If your Supabase password contains '$', escape it as '$$' in Render environment variables.",
+            connectionInfo.Host);
+    }
 }
 else
 {
-    startupLogger.LogInformation("Using PostgreSQL connection source: {ConnectionSource}", resolvedDatabaseConnection.Source);
+    startupLogger.LogWarning("No PostgreSQL connection string resolved. Source: {ConnectionSource}", resolvedDatabaseConnection.Source);
 }
 
 if (app.Environment.IsDevelopment())
@@ -150,44 +161,75 @@ app.MapGet("/", () => Results.Ok(new { status = "ok", service = "QuotationAPI.V2
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 app.MapControllers();
 
-using (var scope = app.Services.CreateScope())
+// Run migrations and seed data in background so the /health endpoint responds
+// immediately and Render does not cancel the deploy due to health check timeout.
+_ = Task.Run(async () =>
 {
-    var db = scope.ServiceProvider.GetRequiredService<QuotationDbContext>();
-    try
+    // Small delay to let Kestrel bind and start listening first.
+    await Task.Delay(TimeSpan.FromSeconds(2));
+
+    const int maxRetries = 5;
+    for (int attempt = 1; attempt <= maxRetries; attempt++)
     {
-        await db.Database.MigrateAsync();
-    }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-        string host = "unknown";
-        int port = 0;
-        if (!string.IsNullOrWhiteSpace(resolvedDatabaseConnection.ConnectionString))
+        try
         {
-            try
+            using var scope = app.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<QuotationDbContext>();
+            var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseMigration");
+
+            logger.LogInformation("Database migration attempt {Attempt}/{MaxRetries}...", attempt, maxRetries);
+
+            await db.Database.MigrateAsync();
+
+            logger.LogInformation("Database migration completed successfully.");
+
+            await EnsurePriceLovDefaultsAsync(db);
+            await EnsureExpenseCategoryLovDefaultsAsync(db);
+            await EnsureZohoBooksTablesAsync(db);
+
+            logger.LogInformation("Database seeding completed successfully.");
+            return; // Success — exit retry loop.
+        }
+        catch (Exception ex)
+        {
+            var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseMigration");
+
+            string host = "unknown";
+            int port = 0;
+            if (!string.IsNullOrWhiteSpace(resolvedDatabaseConnection.ConnectionString))
             {
-                var parsed = new NpgsqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
-                host = NormalizeDbHost(parsed.Host);
-                port = parsed.Port;
+                try
+                {
+                    var parsed = new NpgsqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
+                    host = NormalizeDbHost(parsed.Host);
+                    port = parsed.Port;
+                }
+                catch
+                {
+                    host = "invalid-connection-string";
+                }
             }
-            catch
+
+            if (attempt < maxRetries)
             {
-                host = "invalid-connection-string";
+                var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt)); // Exponential backoff: 2, 4, 8, 16, 32s
+                logger.LogWarning(ex,
+                    "Database migration attempt {Attempt}/{MaxRetries} failed. Source: {ConnectionSource}; Host: {Host}; Port: {Port}. Retrying in {Delay}s...",
+                    attempt, maxRetries, resolvedDatabaseConnection.Source, host, port, delay.TotalSeconds);
+                await Task.Delay(delay);
+            }
+            else
+            {
+                logger.LogCritical(ex,
+                    "Database migration failed after {MaxRetries} attempts. Source: {ConnectionSource}; Host: {Host}; Port: {Port}. "
+                    + "The API will run but database may be in an inconsistent state. "
+                    + "Verify the env var Supabase__PoolerConnectionString is set correctly on Render. "
+                    + "IMPORTANT: If password contains '$', escape it as '$$' in Render env vars (Render expands $VAR references).",
+                    maxRetries, resolvedDatabaseConnection.Source, host, port);
             }
         }
-
-        logger.LogCritical(ex,
-            "Database migration failed during startup. Source: {ConnectionSource}; Host: {Host}; Port: {Port}. Verify Supabase__PoolerConnectionString or ConnectionStrings__DefaultConnection points to a reachable PostgreSQL host in the deployment environment.",
-            resolvedDatabaseConnection.Source,
-            host,
-            port);
-        throw;
     }
-
-    await EnsurePriceLovDefaultsAsync(db);
-    await EnsureExpenseCategoryLovDefaultsAsync(db);
-    await EnsureZohoBooksTablesAsync(db);
-}
+});
 
 app.Run();
 
@@ -238,20 +280,21 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
             builder.SslMode = SslMode.Require;
         }
 
-        if (builder.Timeout <= 0)
-        {
-            builder.Timeout = 15;
-        }
+        // Per Supabase connection management best practices:
+        // Supavisor session pooler requires Npgsql-side pooling to be configured properly.
+        builder.Timeout = builder.Timeout > 0 ? builder.Timeout : 15;
+        builder.CommandTimeout = builder.CommandTimeout > 0 ? builder.CommandTimeout : 60;
+        builder.KeepAlive = builder.KeepAlive > 0 ? builder.KeepAlive : 30;
 
-        if (builder.CommandTimeout <= 0)
+        // Limit pool size to avoid overwhelming Supabase free-tier connection limits.
+        if (builder.MaxPoolSize <= 0 || builder.MaxPoolSize > 20)
         {
-            builder.CommandTimeout = 60;
+            builder.MaxPoolSize = 20;
         }
+        builder.MinPoolSize = 0;
 
-        if (builder.KeepAlive == 0)
-        {
-            builder.KeepAlive = 30;
-        }
+        // Disable Npgsql multiplexing — incompatible with Supavisor transaction pooler.
+        builder.Multiplexing = false;
     }
 
     return (builder.ConnectionString, selected.Source);
