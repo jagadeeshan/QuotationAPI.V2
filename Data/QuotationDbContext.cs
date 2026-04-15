@@ -132,6 +132,27 @@ public class QuotationDbContext : DbContext
             .HasIndex(x => x.Username)
             .IsUnique();
 
+        modelBuilder.Entity<AppUser>()
+            .Property(x => x.AccessStatus)
+            .HasMaxLength(20)
+            .HasDefaultValue("Pending");
+
+        modelBuilder.Entity<AppUser>()
+            .Property(x => x.RequestedRoleName)
+            .HasMaxLength(50);
+
+        modelBuilder.Entity<AppUser>()
+            .Property(x => x.AccessRequestNotes)
+            .HasMaxLength(500);
+
+        modelBuilder.Entity<AppUser>()
+            .Property(x => x.AccessReviewedBy)
+            .HasMaxLength(80);
+
+        modelBuilder.Entity<AppUser>()
+            .Property(x => x.AccessReviewNotes)
+            .HasMaxLength(500);
+
         modelBuilder.Entity<Quotation>()
             .HasIndex(x => x.QuoteNumber)
             .IsUnique();

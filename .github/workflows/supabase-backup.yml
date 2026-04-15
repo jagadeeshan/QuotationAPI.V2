@@ -1,0 +1,68 @@
+name: Supabase Daily Backup
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"
+
+jobs:
+  backup:
+    name: Dump Supabase Database
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Supabase CLI
+        run: npm install --global supabase
+
+      - name: Verify Docker
+        run: docker info
+
+      - name: Create backup timestamp
+        id: ts
+        run: echo "value=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+
+      - name: Dump roles, schema, and data
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "SUPABASE_DB_URL secret is missing."
+            exit 1
+          fi
+
+          mkdir -p backups/supabase/${{ steps.ts.outputs.value }}
+          cd backups/supabase/${{ steps.ts.outputs.value }}
+
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f roles.sql --role-only
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f schema.sql
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f data.sql --use-copy --data-only -x "storage.buckets_vectors" -x "storage.vector_indexes"
+
+          cat > backup-meta.json <<EOF
+          {
+            "createdAtUtc": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+            "backupType": "supabase-cli-db-dump",
+            "source": "Supabase PostgreSQL",
+            "files": ["roles.sql", "schema.sql", "data.sql"]
+          }
+          EOF
+
+      - name: Create archive
+        run: |
+          cd backups/supabase
+          tar -czf supabase-backup-${{ steps.ts.outputs.value }}.tar.gz ${{ steps.ts.outputs.value }}
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-backup-${{ steps.ts.outputs.value }}
+          path: backups/supabase/supabase-backup-${{ steps.ts.outputs.value }}.tar.gz
+          retention-days: 30

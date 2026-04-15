@@ -1,13 +1,17 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using QuotationAPI.V2.Data;
 using QuotationAPI.V2.Models.Admin;
+using QuotationAPI.V2.Models.Auth;
 
 namespace QuotationAPI.V2.Controllers;
 
 [ApiController]
 [Route("api/admin-module")]
+[Authorize(Roles = "Admin")]
 public class AdminModuleController : ControllerBase
 {
     private readonly QuotationDbContext _db;
@@ -263,6 +267,148 @@ public class AdminModuleController : ControllerBase
         await AddAuditLogAsync("delete", "permission", id, $"Deleted permission assignment {id}");
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    [HttpGet("all-roles")]
+    public async Task<IActionResult> GetAllRoles()
+    {
+        var roles = await _db.Roles
+            .Where(x => x.Name != "Pending")
+            .OrderBy(x => x.Name)
+            .ToListAsync();
+
+        return Ok(roles.Select(x => new { x.Id, x.Name, x.Description }));
+    }
+
+    [HttpGet("access-requests")]
+    public async Task<IActionResult> GetAccessRequests([FromQuery] string? status = null)
+    {
+        var query = _db.Users
+            .Include(x => x.Roles)
+            .ThenInclude(x => x.Role)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(x => x.AccessStatus == status);
+        }
+
+        var users = await query
+            .OrderByDescending(x => x.AccessRequestedAt ?? DateTime.MinValue)
+            .ThenBy(x => x.Username)
+            .ToListAsync();
+
+        return Ok(users.Select(ToAccessRequestDto));
+    }
+
+    [HttpPost("access-requests/{userId}/approve")]
+    public async Task<IActionResult> ApproveAccessRequest(string userId, [FromBody] RoleAccessApprovalDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.ApprovedRoleName))
+        {
+            return BadRequest(new { message = "ApprovedRoleName is required." });
+        }
+
+        var user = await _db.Users
+            .Include(x => x.Roles)
+            .ThenInclude(x => x.Role)
+            .FirstOrDefaultAsync(x => x.Id == userId);
+
+        if (user == null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        var roleName = request.ApprovedRoleName.Trim();
+        var role = await _db.Roles.FirstOrDefaultAsync(x => x.Name == roleName);
+        if (role == null)
+        {
+            role = new AppRole
+            {
+                Name = roleName,
+                Description = $"{roleName} role"
+            };
+            _db.Roles.Add(role);
+            await _db.SaveChangesAsync();
+        }
+
+        var existingAssignments = await _db.UserRoles.Where(x => x.UserId == user.Id).ToListAsync();
+        if (existingAssignments.Count > 0)
+        {
+            _db.UserRoles.RemoveRange(existingAssignments);
+        }
+
+        _db.UserRoles.Add(new AppUserRole
+        {
+            UserId = user.Id,
+            RoleId = role.Id
+        });
+
+        user.AccessStatus = "Approved";
+        user.RequestedRoleName = role.Name;
+        user.AccessReviewedBy = ResolveCurrentAdminName();
+        user.AccessReviewedAt = DateTime.UtcNow;
+        user.AccessReviewNotes = string.IsNullOrWhiteSpace(request.Notes) ? "Approved" : request.Notes.Trim();
+
+        await AddAuditLogAsync("approve", "role-request", user.Id, $"Approved access request for {user.Username} as role {role.Name}");
+        await _db.SaveChangesAsync();
+
+        return Ok(ToAccessRequestDto(user));
+    }
+
+    [HttpPost("access-requests/{userId}/reject")]
+    public async Task<IActionResult> RejectAccessRequest(string userId, [FromBody] RoleAccessRejectDto request)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId);
+        if (user == null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        var existingAssignments = await _db.UserRoles.Where(x => x.UserId == user.Id).ToListAsync();
+        if (existingAssignments.Count > 0)
+        {
+            _db.UserRoles.RemoveRange(existingAssignments);
+        }
+
+        user.AccessStatus = "Rejected";
+        user.AccessReviewedBy = ResolveCurrentAdminName();
+        user.AccessReviewedAt = DateTime.UtcNow;
+        user.AccessReviewNotes = string.IsNullOrWhiteSpace(request.Notes) ? "Rejected" : request.Notes.Trim();
+
+        await AddAuditLogAsync("reject", "role-request", user.Id, $"Rejected access request for {user.Username}");
+        await _db.SaveChangesAsync();
+
+        return Ok(ToAccessRequestDto(user));
+    }
+
+    [HttpGet("notifications")]
+    public async Task<IActionResult> GetNotifications()
+    {
+        var pendingRequests = await _db.Users
+            .Where(x => x.AccessStatus == "Pending")
+            .OrderByDescending(x => x.AccessRequestedAt ?? DateTime.MinValue)
+            .Take(100)
+            .ToListAsync();
+
+        var notifications = pendingRequests.Select(user => new AdminNotificationDto(
+            $"access-request:{user.Id}",
+            "RoleAccessRequest",
+            "Role access approval required",
+            $"{user.FirstName} {user.LastName} ({user.Username}) requested role '{user.RequestedRoleName ?? "User"}'.",
+            user.Id,
+            user.AccessRequestedAt ?? DateTime.UtcNow,
+            false
+        ));
+
+        return Ok(notifications);
+    }
+
+    [HttpGet("notifications/count")]
+    public async Task<IActionResult> GetNotificationCount()
+    {
+        var pendingCount = await _db.Users.CountAsync(x => x.AccessStatus == "Pending");
+        return Ok(new { count = pendingCount });
     }
 
     [HttpGet("system-settings")]
@@ -562,6 +708,22 @@ public class AdminModuleController : ControllerBase
         UpdatedBy = profile.UpdatedBy
     };
 
+    private static AccessRequestDto ToAccessRequestDto(AppUser user)
+        => new(
+            user.Id,
+            user.Username,
+            user.Email,
+            user.FirstName,
+            user.LastName,
+            user.AccessStatus,
+            user.RequestedRoleName,
+            user.AccessRequestNotes,
+            user.AccessRequestedAt,
+            user.AccessReviewedBy,
+            user.AccessReviewNotes,
+            user.AccessReviewedAt
+        );
+
     private static List<string> Deserialize(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
@@ -615,6 +777,14 @@ public class AdminModuleController : ControllerBase
         });
 
         return Task.CompletedTask;
+    }
+
+    private string ResolveCurrentAdminName()
+    {
+        return User.FindFirstValue("unique_name")
+            ?? User.FindFirstValue(ClaimTypes.Name)
+            ?? User.FindFirstValue(ClaimTypes.Email)
+            ?? "admin";
     }
 
     public sealed class AdminUserDto

@@ -24,6 +24,25 @@ public class AppUser
 
     public bool IsActive { get; set; } = true;
 
+    [Required, MaxLength(20)]
+    public string AccessStatus { get; set; } = "Pending"; // Pending | Approved | Rejected
+
+    [MaxLength(50)]
+    public string? RequestedRoleName { get; set; }
+
+    [MaxLength(500)]
+    public string? AccessRequestNotes { get; set; }
+
+    public DateTime? AccessRequestedAt { get; set; }
+
+    [MaxLength(80)]
+    public string? AccessReviewedBy { get; set; }
+
+    [MaxLength(500)]
+    public string? AccessReviewNotes { get; set; }
+
+    public DateTime? AccessReviewedAt { get; set; }
+
     public DateTime? LastLogin { get; set; }
 
     public ICollection<AppUserRole> Roles { get; set; } = new List<AppUserRole>();
@@ -83,7 +102,62 @@ public class RegisterRequest
 
     [Required, MinLength(6)]
     public string Password { get; set; } = string.Empty;
+
+    [MaxLength(50)]
+    public string? RequestedRoleName { get; set; }
+
+    [MaxLength(500)]
+    public string? AccessRequestNotes { get; set; }
 }
+
+public class RoleAccessRequestDto
+{
+    [Required, MinLength(2), MaxLength(50)]
+    public string RequestedRoleName { get; set; } = string.Empty;
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
+public class RoleAccessApprovalDto
+{
+    [Required, MinLength(2), MaxLength(50)]
+    public string ApprovedRoleName { get; set; } = string.Empty;
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
+public class RoleAccessRejectDto
+{
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
+public record AccessRequestDto(
+    string UserId,
+    string Username,
+    string Email,
+    string FirstName,
+    string LastName,
+    string AccessStatus,
+    string? RequestedRoleName,
+    string? AccessRequestNotes,
+    DateTime? AccessRequestedAt,
+    string? AccessReviewedBy,
+    string? AccessReviewNotes,
+    DateTime? AccessReviewedAt
+);
+
+public record AdminNotificationDto(
+    string Id,
+    string Type,
+    string Title,
+    string Message,
+    string ResourceId,
+    DateTime CreatedAt,
+    bool IsRead
+);
 
 public class RefreshTokenRequest
 {
@@ -102,7 +176,10 @@ public record UserInfoDto(
     IEnumerable<UserRoleDto> Roles,
     IEnumerable<string> Permissions,
     bool IsActive,
-    DateTime? LastLogin
+    DateTime? LastLogin,
+    string AccessStatus,
+    string? RequestedRoleName,
+    DateTime? AccessRequestedAt
 );
 
 public record LoginResponse(

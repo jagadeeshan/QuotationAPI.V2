@@ -110,18 +110,30 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AngularCors", policy =>
     {
-        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-            ?? new[]
-            {
-                "http://localhost",
-                "http://localhost:7500",
-                "http://localhost:7501",
-                "http://localhost:7502",
-                "http://localhost:4200",
-                "http://localhost:4210"
-            };
+        var configuredOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+        var configuredOriginPatterns = builder.Configuration.GetSection("Cors:AllowedOriginPatterns").Get<string[]>() ?? Array.Empty<string>();
 
-        policy.WithOrigins(allowedOrigins)
+        var defaultOrigins = new[]
+        {
+            "http://localhost",
+            "http://localhost:7500",
+            "http://localhost:7501",
+            "http://localhost:7502",
+            "http://localhost:4200",
+            "http://localhost:4210",
+            "https://magizhops.vercel.app",
+            "https://quotationapi-v2-chzo.onrender.com"
+        };
+
+        var allowedOrigins = configuredOrigins.Length > 0 ? configuredOrigins : defaultOrigins;
+
+        var defaultOriginPatterns = new[]
+        {
+            "https://*.vercel.app"
+        };
+        var allowedOriginPatterns = configuredOriginPatterns.Length > 0 ? configuredOriginPatterns : defaultOriginPatterns;
+
+        policy.SetIsOriginAllowed(origin => IsCorsOriginAllowed(origin, allowedOrigins, allowedOriginPatterns))
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -330,6 +342,49 @@ static string ResolveDatabaseProvider(IConfiguration configuration)
 static bool IsSqlServerProvider(string provider)
 {
     return provider.Equals("SqlServer", StringComparison.OrdinalIgnoreCase);
+}
+
+static bool IsCorsOriginAllowed(string origin, IEnumerable<string> allowedOrigins, IEnumerable<string> allowedOriginPatterns)
+{
+    if (string.IsNullOrWhiteSpace(origin))
+    {
+        return false;
+    }
+
+    if (allowedOrigins.Any(o => string.Equals(o, origin, StringComparison.OrdinalIgnoreCase)))
+    {
+        return true;
+    }
+
+    return allowedOriginPatterns.Any(pattern => IsOriginPatternMatch(origin, pattern));
+}
+
+static bool IsOriginPatternMatch(string origin, string pattern)
+{
+    if (string.IsNullOrWhiteSpace(origin) || string.IsNullOrWhiteSpace(pattern))
+    {
+        return false;
+    }
+
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
+    {
+        return false;
+    }
+
+    if (!Uri.TryCreate(pattern.Replace("*.", "wildcard."), UriKind.Absolute, out var patternUri))
+    {
+        return false;
+    }
+
+    var patternHost = patternUri.Host.Replace("wildcard.", "", StringComparison.OrdinalIgnoreCase);
+    var expectedSuffix = "." + patternHost;
+
+    if (!string.Equals(originUri.Scheme, patternUri.Scheme, StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    return originUri.Host.EndsWith(expectedSuffix, StringComparison.OrdinalIgnoreCase);
 }
 
 static (string? ConnectionString, string Source) ResolveDatabaseConnection(
