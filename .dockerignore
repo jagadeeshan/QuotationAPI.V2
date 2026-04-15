@@ -1,0 +1,15 @@
+bin/
+obj/
+.git/
+.github/
+.vscode/
+.idea/
+*.user
+*.suo
+*.log
+api-dev.log
+api-dev.err.log
+**/node_modules/
+_temp_build_verify/
+_temp_build_verify_empcode/
+_temp_build_verify_idgen/

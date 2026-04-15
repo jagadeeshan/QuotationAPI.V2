@@ -127,6 +127,8 @@ app.Use(async (context, next) =>
 app.UseCors("AngularCors");
 app.UseAuthentication();
 app.UseAuthorization();
+app.MapGet("/", () => Results.Ok(new { status = "ok", service = "QuotationAPI.V2" }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 app.MapControllers();
 
 using (var scope = app.Services.CreateScope())
