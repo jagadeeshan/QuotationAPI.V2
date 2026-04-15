@@ -160,8 +160,27 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        string host = "unknown";
+        int port = 0;
+        if (!string.IsNullOrWhiteSpace(resolvedDatabaseConnection.ConnectionString))
+        {
+            try
+            {
+                var parsed = new NpgsqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
+                host = NormalizeDbHost(parsed.Host);
+                port = parsed.Port;
+            }
+            catch
+            {
+                host = "invalid-connection-string";
+            }
+        }
+
         logger.LogCritical(ex,
-            "Database migration failed during startup. Verify Supabase__PoolerConnectionString or ConnectionStrings__DefaultConnection points to a reachable PostgreSQL host in the deployment environment.");
+            "Database migration failed during startup. Source: {ConnectionSource}; Host: {Host}; Port: {Port}. Verify Supabase__PoolerConnectionString or ConnectionStrings__DefaultConnection points to a reachable PostgreSQL host in the deployment environment.",
+            resolvedDatabaseConnection.Source,
+            host,
+            port);
         throw;
     }
 
@@ -201,6 +220,7 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
     resolvedConnection = NormalizeConnectionString(resolvedConnection);
 
     var builder = new NpgsqlConnectionStringBuilder(resolvedConnection);
+    builder.Host = NormalizeDbHost(builder.Host);
 
     if (!environment.IsDevelopment() &&
         IsRenderEnvironment() &&
@@ -264,6 +284,8 @@ static void ValidateDefaultConnection(string? connectionString, bool isDevelopme
 
     if (!isDevelopment)
     {
+        builder.Host = NormalizeDbHost(builder.Host);
+
         if (builder.Host.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
@@ -313,6 +335,7 @@ static bool IsViableProductionConnectionCandidate(string? connectionString)
     try
     {
         var builder = new NpgsqlConnectionStringBuilder(normalized);
+        builder.Host = NormalizeDbHost(builder.Host);
 
         if (string.IsNullOrWhiteSpace(builder.Host))
         {
@@ -346,9 +369,19 @@ static bool IsViableProductionConnectionCandidate(string? connectionString)
 
 static bool IsSupabaseDirectStyleHost(string? host)
 {
+    host = NormalizeDbHost(host);
+
     return !string.IsNullOrWhiteSpace(host) &&
            host.StartsWith("db.", StringComparison.OrdinalIgnoreCase) &&
            host.EndsWith(".supabase.co", StringComparison.OrdinalIgnoreCase);
+}
+
+static string NormalizeDbHost(string? host)
+{
+    return (host ?? string.Empty)
+        .Trim()
+        .Trim('"')
+        .Trim('\'');
 }
 
 static string NormalizeConnectionString(string connectionString)
