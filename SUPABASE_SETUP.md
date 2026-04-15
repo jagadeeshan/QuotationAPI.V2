@@ -33,7 +33,7 @@ After the project is ready:
 Use the session pooler connection string format below for Render:
 
 ```text
-Host=aws-0-<region>.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.<your-project-ref>;Password=<your-password>;SSL Mode=Require;Trust Server Certificate=true
+Host=aws-0-<region>.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.<your-project-ref>;Password=<your-password>;SSL Mode=Require
 ```
 
 Why this matters:
@@ -56,15 +56,16 @@ Set these variables:
 
 1. `Supabase__PoolerConnectionString`
    - Use the real Supabase session pooler connection string.
+   - Accepted fallback names in the API: `SUPABASE_POOLER_CONNECTION_STRING`, `DATABASE_URL`, `POSTGRES_URL`, `POSTGRES_PRISMA_URL`, `SUPABASE_DB_URL`.
 2. `ConnectionStrings__DefaultConnection`
    - Optional fallback for non-Render environments.
-2. `Jwt__Key`
+3. `Jwt__Key`
    - Use a strong secret at least 32 characters.
-3. `Jwt__Issuer`
+4. `Jwt__Issuer`
    - `QuotationAPI.V2`
-4. `Jwt__Audience`
+5. `Jwt__Audience`
    - `QuotationApp`
-5. `Cors__AllowedOrigins__0`
+6. `Cors__AllowedOrigins__0`
    - Your frontend URL, for example `https://quotation-v2.vercel.app`
 
 Optional Zoho variables can stay empty unless those features are required.
@@ -76,7 +77,7 @@ If you want to test locally before deploying, update the connection string in us
 PowerShell example:
 
 ```powershell
-$env:Supabase__PoolerConnectionString="Host=aws-0-<region>.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.<your-project-ref>;Password=<your-password>;SSL Mode=Require;Trust Server Certificate=true"
+$env:Supabase__PoolerConnectionString="Host=aws-0-<region>.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.<your-project-ref>;Password=<your-password>;SSL Mode=Require"
 $env:ASPNETCORE_ENVIRONMENT="Production"
 dotnet run
 ```
@@ -113,7 +114,7 @@ Once the connection string is correct:
 ### Error: `Name or service not known`
 
 Cause:
-- Invalid host name in `ConnectionStrings__DefaultConnection`
+- Invalid host name in the configured Supabase connection string
 
 Fix:
 - Replace placeholder host with the real Supabase host from `Settings -> Database`
@@ -143,11 +144,12 @@ Cause:
 
 Fix:
 - Reopen Render environment settings and confirm `Supabase__PoolerConnectionString` is present
+- If you stored the connection under `DATABASE_URL` or `SUPABASE_POOLER_CONNECTION_STRING`, the API now accepts those names too
 
 ## 8. Minimum Working Example
 
 Use this as the final shape, replacing the host and password only:
 
 ```text
-Host=aws-0-ap-south-1.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.abcd1234xyz;Password=YOUR_REAL_PASSWORD;SSL Mode=Require;Trust Server Certificate=true
+Host=aws-0-ap-south-1.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.abcd1234xyz;Password=YOUR_REAL_PASSWORD;SSL Mode=Require
 ```

@@ -11,8 +11,8 @@ using QuotationAPI.V2.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var defaultConnection = ResolveDefaultConnection(builder.Configuration, builder.Environment);
-ValidateDefaultConnection(defaultConnection, builder.Environment.IsDevelopment(), IsRenderEnvironment());
+var resolvedDatabaseConnection = ResolveDefaultConnection(builder.Configuration, builder.Environment);
+ValidateDefaultConnection(resolvedDatabaseConnection.ConnectionString, builder.Environment.IsDevelopment(), IsRenderEnvironment());
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -24,7 +24,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<QuotationDbContext>(options =>
-    options.UseNpgsql(defaultConnection));
+    options.UseNpgsql(resolvedDatabaseConnection.ConnectionString));
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddHttpClient();
@@ -92,6 +92,9 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+startupLogger.LogInformation("Using PostgreSQL connection source: {ConnectionSource}", resolvedDatabaseConnection.Source);
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -157,18 +160,33 @@ using (var scope = app.Services.CreateScope())
 
 app.Run();
 
-static string? ResolveDefaultConnection(IConfiguration configuration, IHostEnvironment environment)
+static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfiguration configuration, IHostEnvironment environment)
 {
-    var poolerConnection = configuration["Supabase:PoolerConnectionString"];
-    var defaultConnection = configuration.GetConnectionString("DefaultConnection");
-    var resolvedConnection = !environment.IsDevelopment() && !string.IsNullOrWhiteSpace(poolerConnection)
-        ? poolerConnection
-        : defaultConnection;
+    var candidates = new (string Source, string? Value)[]
+    {
+        ("Supabase__PoolerConnectionString", Environment.GetEnvironmentVariable("Supabase__PoolerConnectionString")),
+        ("SUPABASE_POOLER_CONNECTION_STRING", Environment.GetEnvironmentVariable("SUPABASE_POOLER_CONNECTION_STRING")),
+        ("DATABASE_URL", Environment.GetEnvironmentVariable("DATABASE_URL")),
+        ("POSTGRES_URL", Environment.GetEnvironmentVariable("POSTGRES_URL")),
+        ("POSTGRES_PRISMA_URL", Environment.GetEnvironmentVariable("POSTGRES_PRISMA_URL")),
+        ("SUPABASE_DB_URL", Environment.GetEnvironmentVariable("SUPABASE_DB_URL")),
+        ("ConnectionStrings__DefaultConnection", Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")),
+        ("Supabase:PoolerConnectionString", configuration["Supabase:PoolerConnectionString"]),
+        ("ConnectionStrings:DefaultConnection", configuration.GetConnectionString("DefaultConnection"))
+    };
+
+    var selected = environment.IsDevelopment()
+        ? candidates.FirstOrDefault(candidate => candidate.Source is "ConnectionStrings:DefaultConnection" or "ConnectionStrings__DefaultConnection")
+        : candidates.FirstOrDefault(candidate => IsViableProductionConnectionCandidate(candidate.Value));
+
+    var resolvedConnection = selected.Value;
 
     if (string.IsNullOrWhiteSpace(resolvedConnection))
     {
-        return resolvedConnection;
+        return (null, "none");
     }
+
+    resolvedConnection = NormalizeConnectionString(resolvedConnection);
 
     var builder = new NpgsqlConnectionStringBuilder(resolvedConnection);
 
@@ -195,7 +213,7 @@ static string? ResolveDefaultConnection(IConfiguration configuration, IHostEnvir
         }
     }
 
-    return builder.ConnectionString;
+    return (builder.ConnectionString, selected.Source);
 }
 
 static void ValidateDefaultConnection(string? connectionString, bool isDevelopment, bool isRenderEnvironment)
@@ -260,6 +278,111 @@ static bool IsRenderEnvironment()
     return !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RENDER")) ||
            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RENDER_SERVICE_ID")) ||
            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RENDER_EXTERNAL_URL"));
+}
+
+static bool IsViableProductionConnectionCandidate(string? connectionString)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return false;
+    }
+
+    var normalized = NormalizeConnectionString(connectionString);
+
+    try
+    {
+        var builder = new NpgsqlConnectionStringBuilder(normalized);
+
+        if (string.IsNullOrWhiteSpace(builder.Host))
+        {
+            return false;
+        }
+
+        if (builder.Host.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(builder.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builder.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(builder.Password) ||
+            builder.Password.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+static string NormalizeConnectionString(string connectionString)
+{
+    if (connectionString.Contains("Host=", StringComparison.OrdinalIgnoreCase))
+    {
+        return connectionString;
+    }
+
+    if (!Uri.TryCreate(connectionString, UriKind.Absolute, out var uri))
+    {
+        return connectionString;
+    }
+
+    if (!uri.Scheme.Equals("postgres", StringComparison.OrdinalIgnoreCase) &&
+        !uri.Scheme.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+    {
+        return connectionString;
+    }
+
+    var userInfo = uri.UserInfo.Split(':', 2);
+    var username = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(0) ?? string.Empty);
+    var password = Uri.UnescapeDataString(userInfo.ElementAtOrDefault(1) ?? string.Empty);
+    var database = uri.AbsolutePath.Trim('/');
+    var queryParameters = ParseQueryString(uri.Query);
+
+    var builder = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.Port > 0 ? uri.Port : 5432,
+        Database = string.IsNullOrWhiteSpace(database) ? "postgres" : Uri.UnescapeDataString(database),
+        Username = username,
+        Password = password
+    };
+
+    if (queryParameters.TryGetValue("sslmode", out var sslModeValue) &&
+        Enum.TryParse<SslMode>(sslModeValue, true, out var sslMode))
+    {
+        builder.SslMode = sslMode;
+    }
+
+    return builder.ConnectionString;
+}
+
+static Dictionary<string, string> ParseQueryString(string queryString)
+{
+    var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    if (string.IsNullOrWhiteSpace(queryString))
+    {
+        return parameters;
+    }
+
+    foreach (var pair in queryString.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+    {
+        var keyValue = pair.Split('=', 2);
+        var key = Uri.UnescapeDataString(keyValue[0]).Replace('+', ' ');
+        var value = keyValue.Length > 1 ? Uri.UnescapeDataString(keyValue[1]).Replace('+', ' ') : string.Empty;
+        parameters[key] = value;
+    }
+
+    return parameters;
 }
 
 static async Task EnsurePriceLovDefaultsAsync(QuotationDbContext db)

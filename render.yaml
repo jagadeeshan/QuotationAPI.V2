@@ -17,6 +17,10 @@ services:
         sync: false
       - key: Supabase__PoolerConnectionString
         sync: false
+      - key: SUPABASE_POOLER_CONNECTION_STRING
+        sync: false
+      - key: DATABASE_URL
+        sync: false
       - key: Jwt__Key
         sync: false
       - key: Jwt__Issuer
