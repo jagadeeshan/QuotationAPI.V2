@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -11,9 +12,16 @@ using QuotationAPI.V2.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 var isProduction = builder.Environment.IsProduction();
+var isProdFree = builder.Environment.IsEnvironment("ProdFree");
+var isProductionLike = isProduction || isProdFree;
+var databaseProvider = ResolveDatabaseProvider(builder.Configuration);
 
-var resolvedDatabaseConnection = ResolveDefaultConnection(builder.Configuration, builder.Environment);
-var connectionValidation = ValidateDefaultConnection(resolvedDatabaseConnection.ConnectionString, isProduction, IsRenderEnvironment());
+var resolvedDatabaseConnection = ResolveDatabaseConnection(builder.Configuration, builder.Environment, databaseProvider);
+var connectionValidation = ValidateDatabaseConnection(
+    resolvedDatabaseConnection.ConnectionString,
+    databaseProvider,
+    isProductionLike,
+    IsRenderEnvironment());
 var isDatabaseConfigured = connectionValidation.IsValid;
 
 if (!isDatabaseConfigured)
@@ -21,11 +29,9 @@ if (!isDatabaseConfigured)
     // Log validation errors at startup but do NOT crash — allows health check to pass so Render deploy succeeds.
     var earlyLogger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger("Startup");
     earlyLogger.LogCritical(
-        "DATABASE NOT CONFIGURED: {Error}. The API will start in degraded mode (health check OK, DB endpoints will fail). "
-        + "Go to Render Dashboard → Environment → set Supabase__PoolerConnectionString to: "
-        + "Host=aws-1-ap-northeast-2.pooler.supabase.com;Port=5432;Database=postgres;"
-        + "Username=postgres.avehqeygjwdwyokssbgm;Password=<YOUR_PASSWORD>;SSL Mode=Require  "
-        + "IMPORTANT: If your password contains '$', escape as '$$' in Render env vars.",
+        "DATABASE NOT CONFIGURED for provider {Provider}: {Error}. The API will start in degraded mode (health check OK, DB endpoints will fail)."
+        + " For PostgreSQL on Render, set Supabase__PoolerConnectionString and escape '$' as '$$' if present.",
+        databaseProvider,
         connectionValidation.Error);
 }
 
@@ -42,9 +48,20 @@ builder.Services.AddSwaggerGen();
 // The placeholder lets DI resolve controllers without crashing at startup.
 var dbConnectionString = isDatabaseConfigured
     ? resolvedDatabaseConnection.ConnectionString!
-    : "Host=unconfigured;Database=none;Username=none;Password=none";
+    : IsSqlServerProvider(databaseProvider)
+        ? "Server=unconfigured;Database=none;User Id=none;Password=none;TrustServerCertificate=True"
+        : "Host=unconfigured;Database=none;Username=none;Password=none";
 builder.Services.AddDbContext<QuotationDbContext>(options =>
-    options.UseNpgsql(dbConnectionString));
+{
+    if (IsSqlServerProvider(databaseProvider))
+    {
+        options.UseSqlServer(dbConnectionString, sql => sql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null));
+    }
+    else
+    {
+        options.UseNpgsql(dbConnectionString);
+    }
+});
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddHttpClient();
@@ -54,7 +71,7 @@ var isDevelopment = builder.Environment.IsDevelopment();
 var configuredJwtKey = builder.Configuration["Jwt:Key"];
 if (string.IsNullOrWhiteSpace(configuredJwtKey))
 {
-    if (isProduction)
+    if (isProductionLike)
     {
         throw new InvalidOperationException("Jwt:Key must be configured in non-development environments.");
     }
@@ -62,7 +79,7 @@ if (string.IsNullOrWhiteSpace(configuredJwtKey))
     configuredJwtKey = "DEV_ONLY_SUPER_SECRET_KEY_CHANGE_ME_123456";
 }
 
-if (isProduction && configuredJwtKey.StartsWith("DEV_ONLY_", StringComparison.OrdinalIgnoreCase))
+if (isProductionLike && configuredJwtKey.StartsWith("DEV_ONLY_", StringComparison.OrdinalIgnoreCase))
 {
     throw new InvalidOperationException("Refusing to start with development JWT key outside development.");
 }
@@ -115,27 +132,39 @@ var app = builder.Build();
 var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 if (!string.IsNullOrWhiteSpace(resolvedDatabaseConnection.ConnectionString))
 {
-    var connectionInfo = new NpgsqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
-    startupLogger.LogInformation(
-        "Using PostgreSQL connection source: {ConnectionSource}; Host: {Host}; Port: {Port}; SSL: {SslMode}; MaxPool: {MaxPool}",
-        resolvedDatabaseConnection.Source,
-        connectionInfo.Host,
-        connectionInfo.Port,
-        connectionInfo.SslMode,
-        connectionInfo.MaxPoolSize);
-
-    // Warn if the resolved host looks suspicious (empty, truncated, or has leftover env var syntax).
-    if (string.IsNullOrWhiteSpace(connectionInfo.Host) || connectionInfo.Host.Contains("$"))
+    if (IsSqlServerProvider(databaseProvider))
     {
-        startupLogger.LogError(
-            "SUSPICIOUS HOST DETECTED: '{Host}'. This may indicate Render expanded a $VARIABLE in the connection string env var. "
-            + "If your Supabase password contains '$', escape it as '$$' in Render environment variables.",
-            connectionInfo.Host);
+        var connectionInfo = new SqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
+        startupLogger.LogInformation(
+            "Using SQL Server connection source: {ConnectionSource}; DataSource: {DataSource}; InitialCatalog: {InitialCatalog}",
+            resolvedDatabaseConnection.Source,
+            connectionInfo.DataSource,
+            connectionInfo.InitialCatalog);
+    }
+    else
+    {
+        var connectionInfo = new NpgsqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
+        startupLogger.LogInformation(
+            "Using PostgreSQL connection source: {ConnectionSource}; Host: {Host}; Port: {Port}; SSL: {SslMode}; MaxPool: {MaxPool}",
+            resolvedDatabaseConnection.Source,
+            connectionInfo.Host,
+            connectionInfo.Port,
+            connectionInfo.SslMode,
+            connectionInfo.MaxPoolSize);
+
+        // Warn if the resolved host looks suspicious (empty, truncated, or has leftover env var syntax).
+        if (string.IsNullOrWhiteSpace(connectionInfo.Host) || connectionInfo.Host.Contains("$"))
+        {
+            startupLogger.LogError(
+                "SUSPICIOUS HOST DETECTED: '{Host}'. This may indicate Render expanded a $VARIABLE in the connection string env var. "
+                + "If your Supabase password contains '$', escape it as '$$' in Render environment variables.",
+                connectionInfo.Host);
+        }
     }
 }
 else
 {
-    startupLogger.LogWarning("No PostgreSQL connection string resolved. Source: {ConnectionSource}", resolvedDatabaseConnection.Source);
+    startupLogger.LogWarning("No {DatabaseProvider} connection string resolved. Source: {ConnectionSource}", databaseProvider, resolvedDatabaseConnection.Source);
 }
 
 // Swagger enabled in all environments for API testing.
@@ -176,8 +205,19 @@ app.Use(async (context, next) =>
 app.UseCors("AngularCors");
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapGet("/", () => Results.Ok(new { status = "ok", service = "QuotationAPI.V2", database = isDatabaseConfigured ? "configured" : "NOT_CONFIGURED" }));
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", database = isDatabaseConfigured ? "configured" : "NOT_CONFIGURED" }));
+app.MapGet("/", () => Results.Ok(new
+{
+    status = "ok",
+    service = "QuotationAPI.V2",
+    provider = databaseProvider,
+    database = isDatabaseConfigured ? "configured" : "NOT_CONFIGURED"
+}));
+app.MapGet("/health", () => Results.Ok(new
+{
+    status = "healthy",
+    provider = databaseProvider,
+    database = isDatabaseConfigured ? "configured" : "NOT_CONFIGURED"
+}));
 app.MapControllers();
 
 // Run migrations and seed data in background so the /health endpoint responds
@@ -228,9 +268,18 @@ _ = Task.Run(async () =>
             {
                 try
                 {
-                    var parsed = new NpgsqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
-                    host = NormalizeDbHost(parsed.Host);
-                    port = parsed.Port;
+                    if (IsSqlServerProvider(databaseProvider))
+                    {
+                        var parsed = new SqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
+                        host = NormalizeDbHost(parsed.DataSource);
+                        port = 1433;
+                    }
+                    else
+                    {
+                        var parsed = new NpgsqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
+                        host = NormalizeDbHost(parsed.Host);
+                        port = parsed.Port;
+                    }
                 }
                 catch
                 {
@@ -262,8 +311,109 @@ _ = Task.Run(async () =>
 
 app.Run();
 
+static string ResolveDatabaseProvider(IConfiguration configuration)
+{
+    var configuredProvider =
+        Environment.GetEnvironmentVariable("DB_PROVIDER") ??
+        configuration["Database:Provider"] ??
+        "PostgreSql";
+
+    if (configuredProvider.Equals("sqlserver", StringComparison.OrdinalIgnoreCase) ||
+        configuredProvider.Equals("mssql", StringComparison.OrdinalIgnoreCase))
+    {
+        return "SqlServer";
+    }
+
+    return "PostgreSql";
+}
+
+static bool IsSqlServerProvider(string provider)
+{
+    return provider.Equals("SqlServer", StringComparison.OrdinalIgnoreCase);
+}
+
+static (string? ConnectionString, string Source) ResolveDatabaseConnection(
+    IConfiguration configuration,
+    IHostEnvironment environment,
+    string provider)
+{
+    return IsSqlServerProvider(provider)
+        ? ResolveSqlServerConnection(configuration)
+        : ResolveDefaultConnection(configuration, environment);
+}
+
+static (bool IsValid, string? Error) ValidateDatabaseConnection(
+    string? connectionString,
+    string provider,
+    bool isProductionLike,
+    bool isRenderEnvironment)
+{
+    return IsSqlServerProvider(provider)
+        ? ValidateSqlServerConnection(connectionString, isProductionLike)
+        : ValidateDefaultConnection(connectionString, isProductionLike, isRenderEnvironment);
+}
+
+static (string? ConnectionString, string Source) ResolveSqlServerConnection(IConfiguration configuration)
+{
+    var candidates = new (string Source, string? Value)[]
+    {
+        ("ConnectionStrings__SqlServerConnection", Environment.GetEnvironmentVariable("ConnectionStrings__SqlServerConnection")),
+        ("ConnectionStrings__DefaultConnection", Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")),
+        ("SQLSERVER_CONNECTION_STRING", Environment.GetEnvironmentVariable("SQLSERVER_CONNECTION_STRING")),
+        ("AZURE_SQL_CONNECTION_STRING", Environment.GetEnvironmentVariable("AZURE_SQL_CONNECTION_STRING")),
+        ("ConnectionStrings:SqlServerConnection", configuration.GetConnectionString("SqlServerConnection")),
+        ("ConnectionStrings:DefaultConnection", configuration.GetConnectionString("DefaultConnection"))
+    };
+
+    var selected = candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.Value));
+    return string.IsNullOrWhiteSpace(selected.Value)
+        ? (null, "none")
+        : (selected.Value, selected.Source);
+}
+
+static (bool IsValid, string? Error) ValidateSqlServerConnection(string? connectionString, bool isProductionLike)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return (false, "No SQL Server connection string is configured. Set ConnectionStrings__SqlServerConnection or AZURE_SQL_CONNECTION_STRING.");
+    }
+
+    SqlConnectionStringBuilder builder;
+    try
+    {
+        builder = new SqlConnectionStringBuilder(connectionString);
+    }
+    catch (Exception ex)
+    {
+        return (false, $"The configured SQL Server connection string is not valid: {ex.Message}");
+    }
+
+    if (string.IsNullOrWhiteSpace(builder.DataSource))
+    {
+        return (false, "The configured SQL Server connection string must include Data Source/Server.");
+    }
+
+    if (isProductionLike)
+    {
+        if (builder.DataSource.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, "Production-like SQL Server host is still a placeholder.");
+        }
+
+        if (string.Equals(builder.DataSource, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builder.DataSource, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, "Production-like SQL Server host cannot be localhost.");
+        }
+    }
+
+    return (true, null);
+}
+
 static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfiguration configuration, IHostEnvironment environment)
 {
+    var isProductionLike = IsProductionLike(environment);
+
     var candidates = new (string Source, string? Value)[]
     {
         ("Supabase__PoolerConnectionString", Environment.GetEnvironmentVariable("Supabase__PoolerConnectionString")),
@@ -277,7 +427,7 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
         ("SUPABASE_DB_URL", Environment.GetEnvironmentVariable("SUPABASE_DB_URL"))
     };
 
-    var selected = environment.IsProduction()
+    var selected = isProductionLike
         ? candidates.FirstOrDefault(candidate => IsViableProductionConnectionCandidate(candidate.Value))
         : candidates.FirstOrDefault(candidate =>
             candidate.Source is "ConnectionStrings:DefaultConnection" or "ConnectionStrings__DefaultConnection"
@@ -290,12 +440,12 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
         return (null, "none");
     }
 
-    resolvedConnection = NormalizeConnectionString(resolvedConnection);
+    resolvedConnection = NormalizePostgreSqlConnectionString(resolvedConnection);
 
     var builder = new NpgsqlConnectionStringBuilder(resolvedConnection);
     builder.Host = NormalizeDbHost(builder.Host);
 
-    if (environment.IsProduction() &&
+    if (isProductionLike &&
         IsRenderEnvironment() &&
         IsSupabaseDirectStyleHost(builder.Host) &&
         builder.Port == 5432)
@@ -304,7 +454,7 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
         selected.Source = $"{selected.Source} (auto-switched-to-supavisor-transaction-port)";
     }
 
-    if (environment.IsProduction())
+    if (isProductionLike)
     {
         if (builder.SslMode == SslMode.Disable || builder.SslMode == SslMode.Prefer)
         {
@@ -392,6 +542,11 @@ static bool IsRenderEnvironment()
            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RENDER_EXTERNAL_URL"));
 }
 
+static bool IsProductionLike(IHostEnvironment environment)
+{
+    return environment.IsProduction() || environment.IsEnvironment("ProdFree");
+}
+
 static bool IsViableProductionConnectionCandidate(string? connectionString)
 {
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -399,7 +554,7 @@ static bool IsViableProductionConnectionCandidate(string? connectionString)
         return false;
     }
 
-    var normalized = NormalizeConnectionString(connectionString);
+    var normalized = NormalizePostgreSqlConnectionString(connectionString);
 
     try
     {
@@ -453,7 +608,7 @@ static string NormalizeDbHost(string? host)
         .Trim('\'');
 }
 
-static string NormalizeConnectionString(string connectionString)
+static string NormalizePostgreSqlConnectionString(string connectionString)
 {
     if (connectionString.Contains("Host=", StringComparison.OrdinalIgnoreCase))
     {
