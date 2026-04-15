@@ -137,12 +137,11 @@ else
     startupLogger.LogWarning("No PostgreSQL connection string resolved. Source: {ConnectionSource}", resolvedDatabaseConnection.Source);
 }
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-else
+// Swagger enabled in all environments for API testing.
+app.UseSwagger();
+app.UseSwaggerUI();
+
+if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler(errorApp =>
     {
