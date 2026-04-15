@@ -10,9 +10,10 @@ using QuotationAPI.V2.Models.LOV;
 using QuotationAPI.V2.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+var isProduction = builder.Environment.IsProduction();
 
 var resolvedDatabaseConnection = ResolveDefaultConnection(builder.Configuration, builder.Environment);
-var connectionValidation = ValidateDefaultConnection(resolvedDatabaseConnection.ConnectionString, builder.Environment.IsDevelopment(), IsRenderEnvironment());
+var connectionValidation = ValidateDefaultConnection(resolvedDatabaseConnection.ConnectionString, isProduction, IsRenderEnvironment());
 var isDatabaseConfigured = connectionValidation.IsValid;
 
 if (!isDatabaseConfigured)
@@ -53,7 +54,7 @@ var isDevelopment = builder.Environment.IsDevelopment();
 var configuredJwtKey = builder.Configuration["Jwt:Key"];
 if (string.IsNullOrWhiteSpace(configuredJwtKey))
 {
-    if (!isDevelopment)
+    if (isProduction)
     {
         throw new InvalidOperationException("Jwt:Key must be configured in non-development environments.");
     }
@@ -61,7 +62,7 @@ if (string.IsNullOrWhiteSpace(configuredJwtKey))
     configuredJwtKey = "DEV_ONLY_SUPER_SECRET_KEY_CHANGE_ME_123456";
 }
 
-if (!isDevelopment && configuredJwtKey.StartsWith("DEV_ONLY_", StringComparison.OrdinalIgnoreCase))
+if (isProduction && configuredJwtKey.StartsWith("DEV_ONLY_", StringComparison.OrdinalIgnoreCase))
 {
     throw new InvalidOperationException("Refusing to start with development JWT key outside development.");
 }
@@ -276,9 +277,11 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
         ("SUPABASE_DB_URL", Environment.GetEnvironmentVariable("SUPABASE_DB_URL"))
     };
 
-    var selected = environment.IsDevelopment()
-        ? candidates.FirstOrDefault(candidate => candidate.Source is "ConnectionStrings:DefaultConnection" or "ConnectionStrings__DefaultConnection")
-        : candidates.FirstOrDefault(candidate => IsViableProductionConnectionCandidate(candidate.Value));
+    var selected = environment.IsProduction()
+        ? candidates.FirstOrDefault(candidate => IsViableProductionConnectionCandidate(candidate.Value))
+        : candidates.FirstOrDefault(candidate =>
+            candidate.Source is "ConnectionStrings:DefaultConnection" or "ConnectionStrings__DefaultConnection"
+            && !string.IsNullOrWhiteSpace(candidate.Value));
 
     var resolvedConnection = selected.Value;
 
@@ -292,7 +295,7 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
     var builder = new NpgsqlConnectionStringBuilder(resolvedConnection);
     builder.Host = NormalizeDbHost(builder.Host);
 
-    if (!environment.IsDevelopment() &&
+    if (environment.IsProduction() &&
         IsRenderEnvironment() &&
         IsSupabaseDirectStyleHost(builder.Host) &&
         builder.Port == 5432)
@@ -301,7 +304,7 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
         selected.Source = $"{selected.Source} (auto-switched-to-supavisor-transaction-port)";
     }
 
-    if (!environment.IsDevelopment())
+    if (environment.IsProduction())
     {
         if (builder.SslMode == SslMode.Disable || builder.SslMode == SslMode.Prefer)
         {
@@ -328,7 +331,7 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
     return (builder.ConnectionString, selected.Source);
 }
 
-static (bool IsValid, string? Error) ValidateDefaultConnection(string? connectionString, bool isDevelopment, bool isRenderEnvironment)
+static (bool IsValid, string? Error) ValidateDefaultConnection(string? connectionString, bool isProduction, bool isRenderEnvironment)
 {
     if (string.IsNullOrWhiteSpace(connectionString))
     {
@@ -350,7 +353,7 @@ static (bool IsValid, string? Error) ValidateDefaultConnection(string? connectio
         return (false, "The configured PostgreSQL connection string must include a PostgreSQL host.");
     }
 
-    if (!isDevelopment)
+    if (isProduction)
     {
         builder.Host = NormalizeDbHost(builder.Host);
 
