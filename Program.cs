@@ -4,11 +4,15 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 using QuotationAPI.V2.Data;
 using QuotationAPI.V2.Models.LOV;
 using QuotationAPI.V2.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var defaultConnection = builder.Configuration.GetConnectionString("DefaultConnection");
+ValidateDefaultConnection(defaultConnection, builder.Environment.IsDevelopment());
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -20,7 +24,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<QuotationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(defaultConnection));
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddHttpClient();
@@ -134,13 +138,73 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<QuotationDbContext>();
-    await db.Database.MigrateAsync();
+    try
+    {
+        await db.Database.MigrateAsync();
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        logger.LogCritical(ex,
+            "Database migration failed during startup. Verify ConnectionStrings__DefaultConnection points to a reachable PostgreSQL host in Render environment variables.");
+        throw;
+    }
+
     await EnsurePriceLovDefaultsAsync(db);
     await EnsureExpenseCategoryLovDefaultsAsync(db);
     await EnsureZohoBooksTablesAsync(db);
 }
 
 app.Run();
+
+static void ValidateDefaultConnection(string? connectionString, bool isDevelopment)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException(
+            "ConnectionStrings:DefaultConnection is missing. Set ConnectionStrings__DefaultConnection in the environment.");
+    }
+
+    NpgsqlConnectionStringBuilder builder;
+    try
+    {
+        builder = new NpgsqlConnectionStringBuilder(connectionString);
+    }
+    catch (Exception ex)
+    {
+        throw new InvalidOperationException(
+            "ConnectionStrings:DefaultConnection is not a valid PostgreSQL connection string.", ex);
+    }
+
+    if (string.IsNullOrWhiteSpace(builder.Host))
+    {
+        throw new InvalidOperationException(
+            "ConnectionStrings:DefaultConnection must include a PostgreSQL host.");
+    }
+
+    if (!isDevelopment)
+    {
+        if (builder.Host.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Production database host is still a placeholder. Set ConnectionStrings__DefaultConnection in Render with your real PostgreSQL host.");
+        }
+
+        if (string.Equals(builder.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(builder.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Production database host cannot be localhost. Set ConnectionStrings__DefaultConnection in Render to your external PostgreSQL host.");
+        }
+
+        if (string.IsNullOrWhiteSpace(builder.Password) ||
+            builder.Password.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Production database password is missing or still a placeholder. Set ConnectionStrings__DefaultConnection in Render with the real credentials.");
+        }
+    }
+}
 
 static async Task EnsurePriceLovDefaultsAsync(QuotationDbContext db)
 {

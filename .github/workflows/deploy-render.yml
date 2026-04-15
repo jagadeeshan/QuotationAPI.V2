@@ -1,6 +1,7 @@
 name: API CI/CD (Render)
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main, master]
   push:
@@ -30,9 +31,10 @@ jobs:
 
   deploy:
     name: Trigger Render Deploy
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Validate Render deploy hook
         run: |
@@ -42,4 +44,9 @@ jobs:
           fi
 
       - name: Trigger deploy hook
-        run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+        run: |
+          curl --fail --silent --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --max-time 30 \
+            -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
