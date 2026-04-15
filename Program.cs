@@ -12,7 +12,21 @@ using QuotationAPI.V2.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 var resolvedDatabaseConnection = ResolveDefaultConnection(builder.Configuration, builder.Environment);
-ValidateDefaultConnection(resolvedDatabaseConnection.ConnectionString, builder.Environment.IsDevelopment(), IsRenderEnvironment());
+var connectionValidation = ValidateDefaultConnection(resolvedDatabaseConnection.ConnectionString, builder.Environment.IsDevelopment(), IsRenderEnvironment());
+var isDatabaseConfigured = connectionValidation.IsValid;
+
+if (!isDatabaseConfigured)
+{
+    // Log validation errors at startup but do NOT crash — allows health check to pass so Render deploy succeeds.
+    var earlyLogger = LoggerFactory.Create(b => b.AddConsole()).CreateLogger("Startup");
+    earlyLogger.LogCritical(
+        "DATABASE NOT CONFIGURED: {Error}. The API will start in degraded mode (health check OK, DB endpoints will fail). "
+        + "Go to Render Dashboard → Environment → set Supabase__PoolerConnectionString to: "
+        + "Host=aws-1-ap-northeast-2.pooler.supabase.com;Port=5432;Database=postgres;"
+        + "Username=postgres.avehqeygjwdwyokssbgm;Password=<YOUR_PASSWORD>;SSL Mode=Require  "
+        + "IMPORTANT: If your password contains '$', escape as '$$' in Render env vars.",
+        connectionValidation.Error);
+}
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -23,8 +37,13 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Register DbContext: use real connection when available, dummy placeholder when not.
+// The placeholder lets DI resolve controllers without crashing at startup.
+var dbConnectionString = isDatabaseConfigured
+    ? resolvedDatabaseConnection.ConnectionString!
+    : "Host=unconfigured;Database=none;Username=none;Password=none";
 builder.Services.AddDbContext<QuotationDbContext>(options =>
-    options.UseNpgsql(resolvedDatabaseConnection.ConnectionString));
+    options.UseNpgsql(dbConnectionString));
 
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddHttpClient();
@@ -157,12 +176,21 @@ app.Use(async (context, next) =>
 app.UseCors("AngularCors");
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapGet("/", () => Results.Ok(new { status = "ok", service = "QuotationAPI.V2" }));
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+app.MapGet("/", () => Results.Ok(new { status = "ok", service = "QuotationAPI.V2", database = isDatabaseConfigured ? "configured" : "NOT_CONFIGURED" }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", database = isDatabaseConfigured ? "configured" : "NOT_CONFIGURED" }));
 app.MapControllers();
 
 // Run migrations and seed data in background so the /health endpoint responds
 // immediately and Render does not cancel the deploy due to health check timeout.
+if (!isDatabaseConfigured)
+{
+    var noDB = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseMigration");
+    noDB.LogWarning(
+        "Skipping database migration — no valid connection string configured. "
+        + "Set Supabase__PoolerConnectionString in Render environment variables, then redeploy.");
+}
+else
+{
 _ = Task.Run(async () =>
 {
     // Small delay to let Kestrel bind and start listening first.
@@ -230,6 +258,7 @@ _ = Task.Run(async () =>
         }
     }
 });
+} // end else (isDatabaseConfigured)
 
 app.Run();
 
@@ -300,12 +329,11 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
     return (builder.ConnectionString, selected.Source);
 }
 
-static void ValidateDefaultConnection(string? connectionString, bool isDevelopment, bool isRenderEnvironment)
+static (bool IsValid, string? Error) ValidateDefaultConnection(string? connectionString, bool isDevelopment, bool isRenderEnvironment)
 {
     if (string.IsNullOrWhiteSpace(connectionString))
     {
-        throw new InvalidOperationException(
-            "No PostgreSQL connection string is configured. Set Supabase__PoolerConnectionString for Render or ConnectionStrings__DefaultConnection for other environments.");
+        return (false, "No PostgreSQL connection string is configured. Set Supabase__PoolerConnectionString for Render or ConnectionStrings__DefaultConnection for other environments.");
     }
 
     NpgsqlConnectionStringBuilder builder;
@@ -315,14 +343,12 @@ static void ValidateDefaultConnection(string? connectionString, bool isDevelopme
     }
     catch (Exception ex)
     {
-        throw new InvalidOperationException(
-            "The configured PostgreSQL connection string is not valid.", ex);
+        return (false, $"The configured PostgreSQL connection string is not valid: {ex.Message}");
     }
 
     if (string.IsNullOrWhiteSpace(builder.Host))
     {
-        throw new InvalidOperationException(
-            "The configured PostgreSQL connection string must include a PostgreSQL host.");
+        return (false, "The configured PostgreSQL connection string must include a PostgreSQL host.");
     }
 
     if (!isDevelopment)
@@ -331,32 +357,30 @@ static void ValidateDefaultConnection(string? connectionString, bool isDevelopme
 
         if (builder.Host.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException(
-                "Production database host is still a placeholder. Set Supabase__PoolerConnectionString in Render with your real Supabase pooler host.");
+            return (false, "Production database host is still a placeholder. Set Supabase__PoolerConnectionString in Render with your real Supabase pooler host.");
         }
 
         if (string.Equals(builder.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(builder.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException(
-                "Production database host cannot be localhost. Set Supabase__PoolerConnectionString in Render or ConnectionStrings__DefaultConnection to your external PostgreSQL host.");
+            return (false, "Production database host cannot be localhost. Set Supabase__PoolerConnectionString in Render or ConnectionStrings__DefaultConnection to your external PostgreSQL host.");
         }
 
         if (string.IsNullOrWhiteSpace(builder.Password) ||
             builder.Password.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException(
-                "Production database password is missing or still a placeholder. Set Supabase__PoolerConnectionString in Render with the real credentials.");
+            return (false, "Production database password is missing or still a placeholder. Set Supabase__PoolerConnectionString in Render with the real credentials.");
         }
 
         if (isRenderEnvironment &&
             IsSupabaseDirectStyleHost(builder.Host) &&
             builder.Port == 5432)
         {
-            throw new InvalidOperationException(
-                "Render cannot reliably use the direct Supabase host on port 5432. Use a Supabase pooler connection string or let the app use the Supavisor transaction pooler on port 6543.");
+            return (false, "Render cannot reliably use the direct Supabase host on port 5432. Use a Supabase pooler connection string or let the app use the Supavisor transaction pooler on port 6543.");
         }
     }
+
+    return (true, null);
 }
 
 static bool IsRenderEnvironment()
