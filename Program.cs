@@ -11,8 +11,8 @@ using QuotationAPI.V2.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var defaultConnection = builder.Configuration.GetConnectionString("DefaultConnection");
-ValidateDefaultConnection(defaultConnection, builder.Environment.IsDevelopment());
+var defaultConnection = ResolveDefaultConnection(builder.Configuration, builder.Environment);
+ValidateDefaultConnection(defaultConnection, builder.Environment.IsDevelopment(), IsRenderEnvironment());
 
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -146,7 +146,7 @@ using (var scope = app.Services.CreateScope())
     {
         var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
         logger.LogCritical(ex,
-            "Database migration failed during startup. Verify ConnectionStrings__DefaultConnection points to a reachable PostgreSQL host in Render environment variables.");
+            "Database migration failed during startup. Verify Supabase__PoolerConnectionString or ConnectionStrings__DefaultConnection points to a reachable PostgreSQL host in the deployment environment.");
         throw;
     }
 
@@ -157,12 +157,53 @@ using (var scope = app.Services.CreateScope())
 
 app.Run();
 
-static void ValidateDefaultConnection(string? connectionString, bool isDevelopment)
+static string? ResolveDefaultConnection(IConfiguration configuration, IHostEnvironment environment)
+{
+    var poolerConnection = configuration["Supabase:PoolerConnectionString"];
+    var defaultConnection = configuration.GetConnectionString("DefaultConnection");
+    var resolvedConnection = !environment.IsDevelopment() && !string.IsNullOrWhiteSpace(poolerConnection)
+        ? poolerConnection
+        : defaultConnection;
+
+    if (string.IsNullOrWhiteSpace(resolvedConnection))
+    {
+        return resolvedConnection;
+    }
+
+    var builder = new NpgsqlConnectionStringBuilder(resolvedConnection);
+
+    if (!environment.IsDevelopment())
+    {
+        if (builder.SslMode == SslMode.Disable || builder.SslMode == SslMode.Prefer)
+        {
+            builder.SslMode = SslMode.Require;
+        }
+
+        if (builder.Timeout <= 0)
+        {
+            builder.Timeout = 15;
+        }
+
+        if (builder.CommandTimeout <= 0)
+        {
+            builder.CommandTimeout = 60;
+        }
+
+        if (builder.KeepAlive == 0)
+        {
+            builder.KeepAlive = 30;
+        }
+    }
+
+    return builder.ConnectionString;
+}
+
+static void ValidateDefaultConnection(string? connectionString, bool isDevelopment, bool isRenderEnvironment)
 {
     if (string.IsNullOrWhiteSpace(connectionString))
     {
         throw new InvalidOperationException(
-            "ConnectionStrings:DefaultConnection is missing. Set ConnectionStrings__DefaultConnection in the environment.");
+            "No PostgreSQL connection string is configured. Set Supabase__PoolerConnectionString for Render or ConnectionStrings__DefaultConnection for other environments.");
     }
 
     NpgsqlConnectionStringBuilder builder;
@@ -173,13 +214,13 @@ static void ValidateDefaultConnection(string? connectionString, bool isDevelopme
     catch (Exception ex)
     {
         throw new InvalidOperationException(
-            "ConnectionStrings:DefaultConnection is not a valid PostgreSQL connection string.", ex);
+            "The configured PostgreSQL connection string is not valid.", ex);
     }
 
     if (string.IsNullOrWhiteSpace(builder.Host))
     {
         throw new InvalidOperationException(
-            "ConnectionStrings:DefaultConnection must include a PostgreSQL host.");
+            "The configured PostgreSQL connection string must include a PostgreSQL host.");
     }
 
     if (!isDevelopment)
@@ -187,23 +228,38 @@ static void ValidateDefaultConnection(string? connectionString, bool isDevelopme
         if (builder.Host.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                "Production database host is still a placeholder. Set ConnectionStrings__DefaultConnection in Render with your real PostgreSQL host.");
+                "Production database host is still a placeholder. Set Supabase__PoolerConnectionString in Render with your real Supabase pooler host.");
         }
 
         if (string.Equals(builder.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(builder.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                "Production database host cannot be localhost. Set ConnectionStrings__DefaultConnection in Render to your external PostgreSQL host.");
+                "Production database host cannot be localhost. Set Supabase__PoolerConnectionString in Render or ConnectionStrings__DefaultConnection to your external PostgreSQL host.");
         }
 
         if (string.IsNullOrWhiteSpace(builder.Password) ||
             builder.Password.Contains("REPLACE_", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                "Production database password is missing or still a placeholder. Set ConnectionStrings__DefaultConnection in Render with the real credentials.");
+                "Production database password is missing or still a placeholder. Set Supabase__PoolerConnectionString in Render with the real credentials.");
+        }
+
+        if (isRenderEnvironment &&
+            builder.Host.StartsWith("db.", StringComparison.OrdinalIgnoreCase) &&
+            builder.Host.EndsWith(".supabase.co", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Render cannot reliably use the direct Supabase host. Set Supabase__PoolerConnectionString to the Supabase Supavisor/session pooler connection string instead of db.<project-ref>.supabase.co.");
         }
     }
+}
+
+static bool IsRenderEnvironment()
+{
+    return !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RENDER")) ||
+           !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RENDER_SERVICE_ID")) ||
+           !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RENDER_EXTERNAL_URL"));
 }
 
 static async Task EnsurePriceLovDefaultsAsync(QuotationDbContext db)

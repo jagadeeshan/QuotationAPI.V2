@@ -5,7 +5,7 @@ Standalone ASP.NET Core 8 Web API for Quotation-v2.0 frontend.
 ## Tech Stack
 - ASP.NET Core 8 Web API
 - EF Core 8 (Code-First)
-- SQL Server (development/production)
+- PostgreSQL (localhost for development, Supabase for production)
 - JWT auth endpoints
 - Swagger/OpenAPI
 
@@ -48,17 +48,21 @@ In Quotation-v2.0 development environment:
 - Blueprint/config: `render.yaml`
 - Health check path: `/health`
 
+Database setup guide:
+- See `SUPABASE_SETUP.md` for the exact Supabase PostgreSQL setup and Render connection flow.
+
 2. Render environment variables
-- `ConnectionStrings__DefaultConnection`
+- `Supabase__PoolerConnectionString`
+- `ConnectionStrings__DefaultConnection` (optional fallback outside Render)
 - `Jwt__Key`
 - `Jwt__Issuer=QuotationAPI.V2`
 - `Jwt__Audience=QuotationApp`
 - `Cors__AllowedOrigins__0=<your frontend URL>`
 
 Example PostgreSQL connection string for Render:
-- `Host=db.example.supabase.co;Port=5432;Database=postgres;Username=postgres;Password=<real-password>;SSL Mode=Require;Trust Server Certificate=true`
+- `Host=aws-0-<region>.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.<project-ref>;Password=<real-password>;SSL Mode=Require;Trust Server Certificate=true`
 
-Do not use placeholders like `REPLACE_SUPABASE_HOST` or production `localhost` values.
+Do not use the direct `db.<project-ref>.supabase.co` host on Render. Use the Supabase pooler connection instead.
 
 3. GitHub Actions secret
 - Add repository secret `RENDER_DEPLOY_HOOK_URL`
