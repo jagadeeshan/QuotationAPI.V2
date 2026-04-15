@@ -64,6 +64,7 @@ Example PostgreSQL connection string for Render:
 - `Host=aws-0-<region>.pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.<project-ref>;Password=<real-password>;SSL Mode=Require`
 
 Do not use the direct `db.<project-ref>.supabase.co` host on Render. Use the Supabase session pooler connection instead.
+If Render only injects a direct Supabase URL on port `5432`, the API automatically switches it to the Supavisor transaction pooler port `6543` during startup.
 
 3. GitHub Actions secret
 - Add repository secret `RENDER_DEPLOY_HOOK_URL`

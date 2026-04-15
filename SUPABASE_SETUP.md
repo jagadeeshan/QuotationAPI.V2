@@ -40,6 +40,7 @@ Why this matters:
 
 - Render may fail to reach the direct `db.<project-ref>.supabase.co` endpoint when it resolves to IPv6.
 - The Supabase pooler endpoint is the safer production option for Render.
+- If Render only provides a direct `db.<project-ref>.supabase.co:5432` URL, the API now automatically switches that host to port `6543` so it uses the Supavisor transaction pooler instead of failing at startup.
 
 Do not use:
 
@@ -135,6 +136,7 @@ Cause:
 Fix:
 - Use the Supabase session pooler host instead of `db.<project-ref>.supabase.co`
 - Recopy the host exactly from Supabase
+- If only `DATABASE_URL` is available and it points to `db.<project-ref>.supabase.co:5432`, the API will automatically retry with port `6543` on Render
 - Retry deploy
 
 ### Error: API starts locally but fails on Render

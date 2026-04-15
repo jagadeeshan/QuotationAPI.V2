@@ -93,7 +93,19 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-startupLogger.LogInformation("Using PostgreSQL connection source: {ConnectionSource}", resolvedDatabaseConnection.Source);
+if (!string.IsNullOrWhiteSpace(resolvedDatabaseConnection.ConnectionString))
+{
+    var connectionInfo = new NpgsqlConnectionStringBuilder(resolvedDatabaseConnection.ConnectionString);
+    startupLogger.LogInformation(
+        "Using PostgreSQL connection source: {ConnectionSource}; Host: {Host}; Port: {Port}",
+        resolvedDatabaseConnection.Source,
+        connectionInfo.Host,
+        connectionInfo.Port);
+}
+else
+{
+    startupLogger.LogInformation("Using PostgreSQL connection source: {ConnectionSource}", resolvedDatabaseConnection.Source);
+}
 
 if (app.Environment.IsDevelopment())
 {
@@ -190,6 +202,15 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
 
     var builder = new NpgsqlConnectionStringBuilder(resolvedConnection);
 
+    if (!environment.IsDevelopment() &&
+        IsRenderEnvironment() &&
+        IsSupabaseDirectStyleHost(builder.Host) &&
+        builder.Port == 5432)
+    {
+        builder.Port = 6543;
+        selected.Source = $"{selected.Source} (auto-switched-to-supavisor-transaction-port)";
+    }
+
     if (!environment.IsDevelopment())
     {
         if (builder.SslMode == SslMode.Disable || builder.SslMode == SslMode.Prefer)
@@ -264,11 +285,11 @@ static void ValidateDefaultConnection(string? connectionString, bool isDevelopme
         }
 
         if (isRenderEnvironment &&
-            builder.Host.StartsWith("db.", StringComparison.OrdinalIgnoreCase) &&
-            builder.Host.EndsWith(".supabase.co", StringComparison.OrdinalIgnoreCase))
+            IsSupabaseDirectStyleHost(builder.Host) &&
+            builder.Port == 5432)
         {
             throw new InvalidOperationException(
-                "Render cannot reliably use the direct Supabase host. Set Supabase__PoolerConnectionString to the Supabase Supavisor/session pooler connection string instead of db.<project-ref>.supabase.co.");
+                "Render cannot reliably use the direct Supabase host on port 5432. Use a Supabase pooler connection string or let the app use the Supavisor transaction pooler on port 6543.");
         }
     }
 }
@@ -321,6 +342,13 @@ static bool IsViableProductionConnectionCandidate(string? connectionString)
     {
         return false;
     }
+}
+
+static bool IsSupabaseDirectStyleHost(string? host)
+{
+    return !string.IsNullOrWhiteSpace(host) &&
+           host.StartsWith("db.", StringComparison.OrdinalIgnoreCase) &&
+           host.EndsWith(".supabase.co", StringComparison.OrdinalIgnoreCase);
 }
 
 static string NormalizeConnectionString(string connectionString)
