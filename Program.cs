@@ -178,13 +178,13 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
     {
         ("Supabase__PoolerConnectionString", Environment.GetEnvironmentVariable("Supabase__PoolerConnectionString")),
         ("SUPABASE_POOLER_CONNECTION_STRING", Environment.GetEnvironmentVariable("SUPABASE_POOLER_CONNECTION_STRING")),
+        ("ConnectionStrings__DefaultConnection", Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")),
+        ("Supabase:PoolerConnectionString", configuration["Supabase:PoolerConnectionString"]),
+        ("ConnectionStrings:DefaultConnection", configuration.GetConnectionString("DefaultConnection")),
         ("DATABASE_URL", Environment.GetEnvironmentVariable("DATABASE_URL")),
         ("POSTGRES_URL", Environment.GetEnvironmentVariable("POSTGRES_URL")),
         ("POSTGRES_PRISMA_URL", Environment.GetEnvironmentVariable("POSTGRES_PRISMA_URL")),
-        ("SUPABASE_DB_URL", Environment.GetEnvironmentVariable("SUPABASE_DB_URL")),
-        ("ConnectionStrings__DefaultConnection", Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")),
-        ("Supabase:PoolerConnectionString", configuration["Supabase:PoolerConnectionString"]),
-        ("ConnectionStrings:DefaultConnection", configuration.GetConnectionString("DefaultConnection"))
+        ("SUPABASE_DB_URL", Environment.GetEnvironmentVariable("SUPABASE_DB_URL"))
     };
 
     var selected = environment.IsDevelopment()
