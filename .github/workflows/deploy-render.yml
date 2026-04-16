@@ -1,9 +1,11 @@
 name: API CI/CD (Render)
 
+# Only deploy to production on:
+# 1. Manual workflow dispatch (from GitHub Actions tab)
+# 2. Push to main or master branch
+# PRs to main/master will only build, not deploy
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main, master]
   push:
     branches: [main, master]
 
