@@ -40,7 +40,7 @@ public class IncomeEntry
     public string IncomeType { get; set; } = "independent";
 
     [Required]
-    public string Date { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string Date { get; set; } = string.Empty;
 
     [Required]
     public string Category { get; set; } = "Other";
@@ -70,7 +70,7 @@ public class CustomerOutstanding
     public string Description { get; set; } = string.Empty;
 
     [Required]
-    public string Date { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string Date { get; set; } = string.Empty;
 
     public string? DueDate { get; set; }
     public string? CreatedDate { get; set; }
@@ -97,7 +97,7 @@ public class ExpenseEntry
     public string Type { get; set; } = "cash";
 
     [Required]
-    public string Date { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string Date { get; set; } = string.Empty;
 
     [Required]
     public string Category { get; set; } = "Other";
@@ -127,7 +127,7 @@ public class AccountTransaction
     public string Description { get; set; } = string.Empty;
 
     [Required]
-    public string Date { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string Date { get; set; } = string.Empty;
 
     public string? Category { get; set; }
     public string? Reference { get; set; }
@@ -148,7 +148,7 @@ public class CashTransfer
     public decimal Amount { get; set; }
 
     [Required]
-    public string TransferDate { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string TransferDate { get; set; } = string.Empty;
 
     public string? Remarks { get; set; }
     public string? CreatedDate { get; set; }
@@ -166,7 +166,7 @@ public class ExpenseLedgerRow
     public decimal Amount { get; set; }
 
     [Required]
-    public string ExpenseDate { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string ExpenseDate { get; set; } = string.Empty;
 
     [Required]
     public string ApprovedBy { get; set; } = string.Empty;
@@ -183,7 +183,7 @@ public class IncomeRow
     public decimal Amount { get; set; }
 
     [Required]
-    public string ReceivedDate { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string ReceivedDate { get; set; } = string.Empty;
 
     [Required]
     public string PaymentMode { get; set; } = string.Empty;
@@ -215,7 +215,7 @@ public class PurchaseSalesRow
     public decimal TaxAmount { get; set; }
 
     [Required]
-    public string VoucherDate { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string VoucherDate { get; set; } = string.Empty;
 
     public bool IsDeleted { get; set; } = false;
 }
@@ -240,7 +240,7 @@ public class PurchaseCreateRequest
     public decimal TaxPercent { get; set; }
 
     [Required]
-    public string VoucherDate { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string VoucherDate { get; set; } = string.Empty;
 }
 
 public class PurchaseUpdateRequest
@@ -261,7 +261,7 @@ public class PurchaseUpdateRequest
     public decimal TaxPercent { get; set; }
 
     [Required]
-    public string VoucherDate { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string VoucherDate { get; set; } = string.Empty;
 }
 
 public class TaxPaymentRow
@@ -277,7 +277,7 @@ public class TaxPaymentRow
     public decimal OtherInputCredit { get; set; }
 
     [Required]
-    public string PaymentDate { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string Date { get; set; } = string.Empty;
 
     [Required]
     public string Period { get; set; } = string.Empty;
@@ -430,10 +430,10 @@ public class TaxPaymentCreateRequest
     public decimal Amount { get; set; }
 
     [Required]
-    public string PaymentDate { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string PaymentDate { get; set; } = string.Empty;
 
     [Required]
-    public string Period { get; set; } = DateTime.UtcNow.ToString("yyyy-MM");
+    public string Period { get; set; } = string.Empty;
 }
 
 public class TaxPaymentUpdateRequest
@@ -448,10 +448,10 @@ public class TaxPaymentUpdateRequest
     public decimal Amount { get; set; }
 
     [Required]
-    public string PaymentDate { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string PaymentDate { get; set; } = string.Empty;
 
     [Required]
-    public string Period { get; set; } = DateTime.UtcNow.ToString("yyyy-MM");
+    public string Period { get; set; } = string.Empty;
 }
 
 public class CustomerOutstandingSummary
@@ -481,7 +481,7 @@ public class CustomerSettlementRequest
     public string Type { get; set; } = "bank";
 
     [Required]
-    public string Date { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string Date { get; set; } = string.Empty;
 
     public string? Reference { get; set; }
     public string? Description { get; set; }
@@ -499,8 +499,9 @@ public class AdditionalOutstandingRequest
     public decimal Amount { get; set; }
 
     [Required]
-    public string Date { get; set; } = DateTime.UtcNow.ToString("yyyy-MM-dd");
+    public string Date { get; set; } = string.Empty;
 
     public string? DueDate { get; set; }
     public string? Description { get; set; }
 }
+

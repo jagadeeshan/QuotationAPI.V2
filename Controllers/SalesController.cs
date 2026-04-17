@@ -248,6 +248,81 @@ public class SalesController : ControllerBase
     }
 
     // ────────────────────────────────────────────────────────────────
+    //  PROFIT ENDPOINTS
+    // ────────────────────────────────────────────────────────────────
+
+    [HttpGet("roll/profit")]
+    public async Task<ActionResult<object>> GetRollSalesProfit()
+    {
+        var sales = await _db.RollSales
+            .Where(x => x.Status == "active" && !x.IsDeleted)
+            .ToListAsync();
+
+        var totalProfit = sales.Sum(x => x.Profit);
+        var totalRevenue = sales.Sum(x => x.TotalIncome);
+        var salesCount = sales.Count;
+
+        return Ok(new
+        {
+            totalProfit = Math.Round(totalProfit, 2),
+            totalRevenue = Math.Round(totalRevenue, 2),
+            salesCount
+        });
+    }
+
+    [HttpGet("waste/profit")]
+    public async Task<ActionResult<object>> GetWasteSalesProfit()
+    {
+        var sales = await _db.WasteSales
+            .Where(x => x.Status == "active" && !x.IsDeleted)
+            .ToListAsync();
+
+        var totalProfit = sales.Sum(x => x.TotalAmount);
+        var totalRevenue = sales.Sum(x => x.TotalAmount);
+        var salesCount = sales.Count;
+
+        return Ok(new
+        {
+            totalProfit = Math.Round(totalProfit, 2),
+            totalRevenue = Math.Round(totalRevenue, 2),
+            salesCount
+        });
+    }
+
+    [HttpGet("profit/combined")]
+    public async Task<ActionResult<object>> GetCombinedSalesProfit()
+    {
+        var rollSales = await _db.RollSales
+            .Where(x => x.Status == "active" && !x.IsDeleted)
+            .ToListAsync();
+
+        var wasteSales = await _db.WasteSales
+            .Where(x => x.Status == "active" && !x.IsDeleted)
+            .ToListAsync();
+
+        var rollProfit = rollSales.Sum(x => x.Profit);
+        var rollRevenue = rollSales.Sum(x => x.TotalIncome);
+        var wasteProfit = wasteSales.Sum(x => x.TotalAmount);
+        var wasteRevenue = wasteSales.Sum(x => x.TotalAmount);
+
+        var totalProfit = rollProfit + wasteProfit;
+        var totalRevenue = rollRevenue + wasteRevenue;
+
+        return Ok(new
+        {
+            rollSalesProfit = Math.Round(rollProfit, 2),
+            wasteSalesProfit = Math.Round(wasteProfit, 2),
+            totalProfit = Math.Round(totalProfit, 2),
+            rollSalesRevenue = Math.Round(rollRevenue, 2),
+            wasteSalesRevenue = Math.Round(wasteRevenue, 2),
+            totalRevenue = Math.Round(totalRevenue, 2),
+            rollSalesCount = rollSales.Count,
+            wasteSalesCount = wasteSales.Count,
+            totalCount = rollSales.Count + wasteSales.Count
+        });
+    }
+
+    // ────────────────────────────────────────────────────────────────
     //  PRIVATE HELPERS
     // ────────────────────────────────────────────────────────────────
 

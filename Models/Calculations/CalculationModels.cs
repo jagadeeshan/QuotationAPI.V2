@@ -22,12 +22,13 @@ public class InvoiceCalcRecord
     public decimal Amount { get; set; }
     public string DataJson { get; set; } = "{}";
     public bool IsDeleted { get; set; } = false;
+    public DateTime? DeliveryDate { get; set; }
 }
-
 public class CalcRecordSaveRequest
 {
     public string CompanyName { get; set; } = "";
     public string Description { get; set; } = "";
     public decimal Amount { get; set; }
     public string DataJson { get; set; } = "{}";
+    public DateTime? DeliveryDate { get; set; }
 }

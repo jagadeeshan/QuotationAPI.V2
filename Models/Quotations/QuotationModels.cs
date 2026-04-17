@@ -44,7 +44,6 @@ public class Quotation
 
     public DateTime? ModifiedDate { get; set; }
 
-    public DateTime? DeliveryDate { get; set; }
 
     [Required, MaxLength(80)]
     public string CreatedBy { get; set; } = "system";
@@ -111,7 +110,6 @@ public class CreateQuotationRequest
     [Range(1, 365)]
     public int ValidityDays { get; set; }
 
-    public DateTime? DeliveryDate { get; set; }
 
     public IEnumerable<CreateLineItemRequest>? LineItems { get; set; }
 }
@@ -135,7 +133,6 @@ public class UpdateQuotationRequest
 
     public QuotationStatus? Status { get; set; }
 
-    public DateTime? DeliveryDate { get; set; }
 
     public IEnumerable<CreateLineItemRequest>? LineItems { get; set; }
 }
