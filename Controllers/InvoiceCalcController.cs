@@ -57,7 +57,8 @@ public class InvoiceCalcController : ControllerBase
             Amount = req.Amount,
             DataJson = NormalizeCalculationDataJson(req.DataJson),
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            DeliveryDate = req.DeliveryDate
         };
         _db.InvoiceCalcRecords.Add(record);
         await _db.SaveChangesAsync();
@@ -74,6 +75,7 @@ public class InvoiceCalcController : ControllerBase
         record.Amount = req.Amount;
         record.DataJson = NormalizeCalculationDataJson(req.DataJson);
         record.UpdatedAt = DateTime.UtcNow;
+        record.DeliveryDate = req.DeliveryDate;
         await _db.SaveChangesAsync();
         return Ok(record);
     }
@@ -100,7 +102,8 @@ public class InvoiceCalcController : ControllerBase
             Amount = source.Amount,
             DataJson = NormalizeCalculationDataJson(source.DataJson),
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            DeliveryDate = source.DeliveryDate
         };
         _db.InvoiceCalcRecords.Add(clone);
         await _db.SaveChangesAsync();
@@ -144,7 +147,30 @@ public class InvoiceCalcController : ControllerBase
                 rootNode["item"] = itemNode;
             }
 
-            var boxNode = rootNode["box"] as JsonObject;
+            // Ensure box node exists and has required fields
+            if (rootNode["box"] is not JsonObject boxNode)
+            {
+                boxNode = new JsonObject();
+                rootNode["box"] = boxNode;
+            }
+
+            if (boxNode["noOfBoxPerBoard"] == null)
+            {
+                boxNode["noOfBoxPerBoard"] = 1;
+            }
+
+            // Ensure price node exists and has required fields
+            if (rootNode["price"] is not JsonObject priceNode)
+            {
+                priceNode = new JsonObject();
+                rootNode["price"] = priceNode;
+            }
+
+            if (priceNode["singleBoxPriceToCustomer"] == null)
+            {
+                priceNode["singleBoxPriceToCustomer"] = 0;
+            }
+
             var customerName = ReadString(itemNode, "customerName")
                 ?? ReadString(boxNode, "company")
                 ?? string.Empty;

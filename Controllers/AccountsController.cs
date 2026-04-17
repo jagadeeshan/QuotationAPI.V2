@@ -37,7 +37,7 @@ public class AccountsController : ControllerBase
     [HttpGet("expenses/total")]
     public async Task<ActionResult<decimal>> GetTotalExpenses()
     {
-        var rows = await _db.ExpenseEntries.Where(x => x.Status == "active").ToListAsync();
+        var rows = await _db.ExpenseEntries.Where(x => x.Status == "active" && !x.IsDeleted).ToListAsync();
         return Ok(rows.Sum(x => x.Amount));
     }
 
@@ -615,7 +615,7 @@ public class AccountsController : ControllerBase
     public async Task<ActionResult<IEnumerable<ExpenseSummary>>> GetExpenseSummary([FromQuery] int year, [FromQuery] int? month)
     {
         var expenses = await _db.ExpenseEntries
-            .Where(x => x.Status == "active")
+            .Where(x => x.Status == "active" && !x.IsDeleted)
             .ToListAsync();
 
         var monthly = expenses
@@ -637,10 +637,10 @@ public class AccountsController : ControllerBase
     public async Task<ActionResult<IEnumerable<object>>> GetMonthlyTrend()
     {
         var income = await _db.IncomeEntries
-            .Where(x => x.Status == "active")
+            .Where(x => x.Status == "active" && !x.IsDeleted)
             .ToListAsync();
         var expense = await _db.ExpenseEntries
-            .Where(x => x.Status == "active")
+            .Where(x => x.Status == "active" && !x.IsDeleted)
             .ToListAsync();
 
         var now = DateTime.UtcNow;
@@ -670,8 +670,8 @@ public class AccountsController : ControllerBase
     {
         var cash = await _db.BankCashBalances.Where(x => x.Type == "cash").Select(x => x.Balance).FirstOrDefaultAsync();
         var bank = await _db.BankCashBalances.Where(x => x.Type == "bank").Select(x => x.Balance).FirstOrDefaultAsync();
-        var income = (await _db.IncomeEntries.Where(x => x.Status == "active").ToListAsync()).Sum(x => x.Amount);
-        var expense = (await _db.ExpenseEntries.Where(x => x.Status == "active").ToListAsync()).Sum(x => x.Amount);
+        var income = (await _db.IncomeEntries.Where(x => x.Status == "active" && !x.IsDeleted).ToListAsync()).Sum(x => x.Amount);
+        var expense = (await _db.ExpenseEntries.Where(x => x.Status == "active" && !x.IsDeleted).ToListAsync()).Sum(x => x.Amount);
 
         return Ok(new AccountSummary(cash, bank, income, expense));
     }
@@ -725,7 +725,7 @@ public class AccountsController : ControllerBase
     [HttpGet("expense-dashboard")]
     public async Task<ActionResult<ExpenseDashboard>> GetExpenseDashboard()
     {
-        var allExpenses = await _db.ExpenseEntries.Where(x => x.Status == "active").ToListAsync();
+        var allExpenses = await _db.ExpenseEntries.Where(x => x.Status == "active" && !x.IsDeleted).ToListAsync();
 
         var now = DateTime.UtcNow;
         var monthKey = now.ToString("yyyy-MM");
@@ -1096,7 +1096,7 @@ public class AccountsController : ControllerBase
     }
 
     [HttpGet("ledger/tax-payments")]
-    public async Task<ActionResult<IEnumerable<TaxPaymentRow>>> GetTaxPayments() => Ok(await _db.TaxPaymentRows.OrderByDescending(x => x.PaymentDate).ThenByDescending(x => x.ChallanNo).ToListAsync());
+    public async Task<ActionResult<IEnumerable<TaxPaymentRow>>> GetTaxPayments() => Ok(await _db.TaxPaymentRows.OrderByDescending(x => x.Date).ThenByDescending(x => x.ChallanNo).ToListAsync());
 
     [HttpGet("ledger/tax-payments/monthly-due")]
     public async Task<ActionResult<object>> GetMonthlyTaxDue([FromQuery] string period)
@@ -1161,7 +1161,7 @@ public class AccountsController : ControllerBase
             ChallanNo = challanNo,
             TaxType = BuildTaxTypeWithMode(request.TaxType, mode),
             Amount = request.Amount,
-            PaymentDate = request.PaymentDate,
+            Date = request.PaymentDate,
             Period = normalizedPeriod,
             OtherInputCredit = 0m
         };
@@ -1215,7 +1215,7 @@ public class AccountsController : ControllerBase
 
         existing.TaxType = BuildTaxTypeWithMode(request.TaxType, newMode);
         existing.Amount = request.Amount;
-        existing.PaymentDate = request.PaymentDate;
+        existing.Date = request.PaymentDate;
         existing.Period = normalizedPeriod;
 
         var (_, inputTaxCredit, netTaxPayable) = await CalculateMonthlyTaxDueAsync(periodDate);

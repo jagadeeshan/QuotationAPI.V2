@@ -21,7 +21,7 @@ public class ExpenseRecordsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ExpenseRecord>>> GetAll([FromQuery] string? category, [FromQuery] string? status)
     {
-        var query = _db.ExpenseRecords.AsQueryable();
+        var query = _db.ExpenseRecords.Where(x => !x.IsDeleted);
 
         if (!string.IsNullOrWhiteSpace(category))
         {
@@ -44,7 +44,7 @@ public class ExpenseRecordsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<ExpenseRecord>> GetById(string id)
     {
-        var record = await _db.ExpenseRecords.FindAsync(id);
+        var record = await _db.ExpenseRecords.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted);
         return record == null ? NotFound() : Ok(record);
     }
 
@@ -52,7 +52,7 @@ public class ExpenseRecordsController : ControllerBase
     public async Task<ActionResult<decimal>> GetTotal([FromQuery] string startDate, [FromQuery] string endDate)
     {
         var records = await _db.ExpenseRecords
-            .Where(x => !string.IsNullOrWhiteSpace(x.ExpenseDate))
+            .Where(x => !x.IsDeleted && !string.IsNullOrWhiteSpace(x.ExpenseDate))
             .ToListAsync();
 
         var total = records
@@ -66,7 +66,7 @@ public class ExpenseRecordsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ExpenseRecord>> Create([FromBody] CreateExpenseRequest request)
     {
-        var count = await _db.ExpenseRecords.CountAsync() + 1;
+        var count = await _db.ExpenseRecords.Where(x => !x.IsDeleted).CountAsync() + 1;
         var now = DateTime.UtcNow;
         var record = new ExpenseRecord
         {
@@ -92,7 +92,7 @@ public class ExpenseRecordsController : ControllerBase
     [HttpPut("{id}")]
     public async Task<ActionResult<ExpenseRecord>> Update(string id, [FromBody] UpdateExpenseRequest request)
     {
-        var record = await _db.ExpenseRecords.FindAsync(id);
+        var record = await _db.ExpenseRecords.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted);
         if (record == null)
         {
             return NotFound();
@@ -115,7 +115,7 @@ public class ExpenseRecordsController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(string id)
     {
-        var record = await _db.ExpenseRecords.FindAsync(id);
+        var record = await _db.ExpenseRecords.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted);
         if (record == null)
         {
             return NotFound();
@@ -123,6 +123,7 @@ public class ExpenseRecordsController : ControllerBase
 
         await RemoveExpenseEntryLinkAsync(record.Id);
         record.IsDeleted = true;
+        record.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return NoContent();
     }
@@ -131,6 +132,7 @@ public class ExpenseRecordsController : ControllerBase
     public async Task<ActionResult<object>> SyncAccountingEntries()
     {
         var records = await _db.ExpenseRecords
+            .Where(x => !x.IsDeleted)
             .OrderBy(x => x.CreatedAt)
             .ThenBy(x => x.ExpenseDate)
             .ToListAsync();
