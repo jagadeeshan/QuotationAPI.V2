@@ -480,17 +480,6 @@ public class AdminModuleController : ControllerBase
         return Ok(profiles.Select(ToCompanyProfileDto));
     }
 
-    [HttpGet("company-profiles/active")]
-    public async Task<IActionResult> GetActiveCompanyProfile()
-    {
-        var profile = await _db.AdminCompanyProfiles
-            .OrderByDescending(x => x.IsActive)
-            .ThenByDescending(x => x.UpdatedAt)
-            .FirstOrDefaultAsync();
-
-        return profile == null ? NotFound() : Ok(ToCompanyProfileDto(profile));
-    }
-
     [HttpPost("company-profiles")]
     public async Task<IActionResult> CreateCompanyProfile([FromBody] AdminCompanyProfileDto request)
     {
