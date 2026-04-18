@@ -24,7 +24,13 @@ jobs:
           node-version: "24"
 
       - name: Install Supabase CLI
-        run: npm install --global supabase
+        run: |
+          # Download and install Supabase CLI binary directly
+          curl -L "https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz" -o supabase.tar.gz
+          tar -xzf supabase.tar.gz
+          mv supabase /usr/local/bin/supabase
+          rm supabase.tar.gz
+          supabase --version
 
       - name: Verify Docker
         run: docker info
