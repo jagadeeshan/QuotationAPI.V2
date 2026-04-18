@@ -484,19 +484,34 @@ static (bool IsValid, string? Error) ValidateSqlServerConnection(string? connect
 static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfiguration configuration, IHostEnvironment environment)
 {
     var isProductionLike = IsProductionLike(environment);
+    var isDevelopment = environment.IsDevelopment();
 
-    var candidates = new (string Source, string? Value)[]
-    {
-        ("Supabase__PoolerConnectionString", Environment.GetEnvironmentVariable("Supabase__PoolerConnectionString")),
-        ("SUPABASE_POOLER_CONNECTION_STRING", Environment.GetEnvironmentVariable("SUPABASE_POOLER_CONNECTION_STRING")),
-        ("ConnectionStrings__DefaultConnection", Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")),
-        ("Supabase:PoolerConnectionString", configuration["Supabase:PoolerConnectionString"]),
-        ("ConnectionStrings:DefaultConnection", configuration.GetConnectionString("DefaultConnection")),
-        ("DATABASE_URL", Environment.GetEnvironmentVariable("DATABASE_URL")),
-        ("POSTGRES_URL", Environment.GetEnvironmentVariable("POSTGRES_URL")),
-        ("POSTGRES_PRISMA_URL", Environment.GetEnvironmentVariable("POSTGRES_PRISMA_URL")),
-        ("SUPABASE_DB_URL", Environment.GetEnvironmentVariable("SUPABASE_DB_URL"))
-    };
+    // In Development, prioritize local connection over Supabase
+    var candidates = isDevelopment
+        ? new (string Source, string? Value)[]
+        {
+            ("ConnectionStrings__DefaultConnection", Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")),
+            ("ConnectionStrings:DefaultConnection", configuration.GetConnectionString("DefaultConnection")),
+            ("Supabase__PoolerConnectionString", Environment.GetEnvironmentVariable("Supabase__PoolerConnectionString")),
+            ("SUPABASE_POOLER_CONNECTION_STRING", Environment.GetEnvironmentVariable("SUPABASE_POOLER_CONNECTION_STRING")),
+            ("Supabase:PoolerConnectionString", configuration["Supabase:PoolerConnectionString"]),
+            ("DATABASE_URL", Environment.GetEnvironmentVariable("DATABASE_URL")),
+            ("POSTGRES_URL", Environment.GetEnvironmentVariable("POSTGRES_URL")),
+            ("POSTGRES_PRISMA_URL", Environment.GetEnvironmentVariable("POSTGRES_PRISMA_URL")),
+            ("SUPABASE_DB_URL", Environment.GetEnvironmentVariable("SUPABASE_DB_URL"))
+        }
+        : new (string Source, string? Value)[]
+        {
+            ("Supabase__PoolerConnectionString", Environment.GetEnvironmentVariable("Supabase__PoolerConnectionString")),
+            ("SUPABASE_POOLER_CONNECTION_STRING", Environment.GetEnvironmentVariable("SUPABASE_POOLER_CONNECTION_STRING")),
+            ("ConnectionStrings__DefaultConnection", Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")),
+            ("Supabase:PoolerConnectionString", configuration["Supabase:PoolerConnectionString"]),
+            ("ConnectionStrings:DefaultConnection", configuration.GetConnectionString("DefaultConnection")),
+            ("DATABASE_URL", Environment.GetEnvironmentVariable("DATABASE_URL")),
+            ("POSTGRES_URL", Environment.GetEnvironmentVariable("POSTGRES_URL")),
+            ("POSTGRES_PRISMA_URL", Environment.GetEnvironmentVariable("POSTGRES_PRISMA_URL")),
+            ("SUPABASE_DB_URL", Environment.GetEnvironmentVariable("SUPABASE_DB_URL"))
+        };
 
     var selected = isProductionLike
         ? candidates.FirstOrDefault(candidate => IsViableProductionConnectionCandidate(candidate.Value))
