@@ -500,9 +500,7 @@ static (string? ConnectionString, string Source) ResolveDefaultConnection(IConfi
 
     var selected = isProductionLike
         ? candidates.FirstOrDefault(candidate => IsViableProductionConnectionCandidate(candidate.Value))
-        : candidates.FirstOrDefault(candidate =>
-            candidate.Source is "ConnectionStrings:DefaultConnection" or "ConnectionStrings__DefaultConnection"
-            && !string.IsNullOrWhiteSpace(candidate.Value));
+        : candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.Value));
 
     var resolvedConnection = selected.Value;
 
