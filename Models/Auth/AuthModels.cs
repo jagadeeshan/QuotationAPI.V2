@@ -46,6 +46,41 @@ public class AppUser
     public DateTime? LastLogin { get; set; }
 
     public ICollection<AppUserRole> Roles { get; set; } = new List<AppUserRole>();
+    public ICollection<AppRefreshToken> RefreshTokens { get; set; } = new List<AppRefreshToken>();
+}
+
+public class AppRefreshToken
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    [Required]
+    public string UserId { get; set; } = string.Empty;
+
+    [Required, MaxLength(128)]
+    public string TokenId { get; set; } = string.Empty;
+
+    [Required, MaxLength(512)]
+    public string TokenHash { get; set; } = string.Empty;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime ExpiresAt { get; set; }
+
+    public DateTime? LastUsedAt { get; set; }
+
+    public DateTime? RevokedAt { get; set; }
+
+    [MaxLength(128)]
+    public string? ReplacedByTokenId { get; set; }
+
+    [MaxLength(64)]
+    public string? RevokedReason { get; set; }
+
+    [MaxLength(256)]
+    public string? CreatedByIp { get; set; }
+
+    public AppUser? User { get; set; }
 }
 
 public class AppRole
@@ -189,4 +224,4 @@ public record LoginResponse(
     UserInfoDto User
 );
 
-public record RefreshTokenResponse(string AccessToken, int ExpiresIn);
+public record RefreshTokenResponse(string AccessToken, string RefreshToken, int ExpiresIn);

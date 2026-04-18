@@ -30,6 +30,7 @@ public class QuotationDbContext : DbContext
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<AppRole> Roles => Set<AppRole>();
     public DbSet<AppUserRole> UserRoles => Set<AppUserRole>();
+    public DbSet<AppRefreshToken> RefreshTokens => Set<AppRefreshToken>();
 
     public DbSet<Quotation> Quotations => Set<Quotation>();
     public DbSet<QuotationLineItem> QuotationLineItems => Set<QuotationLineItem>();
@@ -121,6 +122,36 @@ public class QuotationDbContext : DbContext
             .WithMany(x => x.Users)
             .HasForeignKey(x => x.RoleId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<AppRefreshToken>()
+            .HasOne(x => x.User)
+            .WithMany(x => x.RefreshTokens)
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<AppRefreshToken>()
+            .HasIndex(x => x.TokenId)
+            .IsUnique();
+
+        modelBuilder.Entity<AppRefreshToken>()
+            .Property(x => x.TokenId)
+            .HasMaxLength(128);
+
+        modelBuilder.Entity<AppRefreshToken>()
+            .Property(x => x.TokenHash)
+            .HasMaxLength(512);
+
+        modelBuilder.Entity<AppRefreshToken>()
+            .Property(x => x.ReplacedByTokenId)
+            .HasMaxLength(128);
+
+        modelBuilder.Entity<AppRefreshToken>()
+            .Property(x => x.RevokedReason)
+            .HasMaxLength(64);
+
+        modelBuilder.Entity<AppRefreshToken>()
+            .Property(x => x.CreatedByIp)
+            .HasMaxLength(256);
 
         modelBuilder.Entity<Quotation>()
             .HasMany(x => x.LineItems)

@@ -68,6 +68,7 @@ public class EmpSalaryAdvance
     public string RequestDate { get; set; } = "";
     public string Reason { get; set; } = "";
     public string Status { get; set; } = "requested";
+    public string PaymentMode { get; set; } = "cash";
     public bool IsDeleted { get; set; } = false;
 }
 

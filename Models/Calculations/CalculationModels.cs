@@ -31,4 +31,5 @@ public class CalcRecordSaveRequest
     public decimal Amount { get; set; }
     public string DataJson { get; set; } = "{}";
     public DateTime? DeliveryDate { get; set; }
+    public bool ForceNewItemIdentity { get; set; }
 }

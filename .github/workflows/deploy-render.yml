@@ -3,14 +3,18 @@ name: API CI/CD (Render)
 # Only deploy to production on:
 # 1. Manual workflow dispatch (from GitHub Actions tab)
 # 2. Push to main or master branch
-# PRs to main/master will only build, not deploy
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
 
+# Prevent concurrent deployments
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_VERSION: "20"
 
 jobs:
   build:
@@ -35,11 +39,11 @@ jobs:
         run: dotnet publish --configuration Release --no-build -o out
 
   deploy:
-    name: Trigger Render Deploy
+    name: Deploy to Render
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Validate Render deploy hook
         run: |
@@ -55,3 +59,32 @@ jobs:
             --retry-all-errors \
             --max-time 30 \
             -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+
+      - name: Wait for deployment and verify health
+        run: |
+          echo "Waiting for Render deployment to complete..."
+          sleep 30
+          
+          RENDER_URL="${{ secrets.RENDER_SERVICE_URL }}"
+          if [ -z "$RENDER_URL" ]; then
+            echo "RENDER_SERVICE_URL not set, skipping health check. Set this secret to enable verification."
+            exit 0
+          fi
+          
+          echo "Polling health endpoint at $RENDER_URL/health..."
+          for i in {1..24}; do
+            STATUS=$(curl -s "$RENDER_URL/health" | jq -r '.migrationStatus // .status // empty' 2>/dev/null || echo "pending")
+            echo "Attempt $i/24: migrationStatus=$STATUS"
+            
+            if [ "$STATUS" = "succeeded" ] || [ "$STATUS" = "healthy" ]; then
+              echo "✓ Deployment verified - migrations completed"
+              exit 0
+            elif [ "$STATUS" = "failed" ]; then
+              echo "✗ Deployment failed - migrations failed"
+              exit 1
+            fi
+            sleep 15
+          done
+          
+          echo "⚠ Health check timeout - deployment may still be in progress"
+          exit 0

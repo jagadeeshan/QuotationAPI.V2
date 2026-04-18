@@ -943,7 +943,7 @@ public class AccountsController : ControllerBase
             .ToListAsync();
 
         var customers = await _db.CustomerMasters.ToListAsync();
-        var gstRows = BuildMockGstPurchases(periodDate, customers);
+        var gstRows = await BuildGstPurchasesFromDbAsync(periodDate, customers);
 
         var response = new GstPurchaseSyncResponse
         {
@@ -1292,53 +1292,67 @@ public class AccountsController : ControllerBase
         return false;
     }
 
-    private static List<GstPurchaseSyncItem> BuildMockGstPurchases(DateTime periodDate, IReadOnlyCollection<CustomerMaster> customers)
+    private async Task<List<GstPurchaseSyncItem>> BuildGstPurchasesFromDbAsync(DateTime periodDate, IReadOnlyCollection<CustomerMaster> customers)
     {
-        var seeded = customers
-            .Where(c => !string.IsNullOrWhiteSpace(c.GstNumber))
-            .Take(3)
-            .Select((customer, index) =>
-            {
-                var taxable = 10000m + (index * 3500m);
-                var taxPercent = index % 2 == 0 ? 18m : 12m;
-                var taxAmount = Math.Round(taxable * (taxPercent / 100m), 2);
-                return new GstPurchaseSyncItem
-                {
-                    GstNumber = customer.GstNumber!.Trim().ToUpperInvariant(),
-                    SupplierName = customer.Name,
-                    InvoiceNumber = $"GST-{periodDate:yyyyMM}-{index + 1:000}",
-                    InvoiceDate = new DateTime(periodDate.Year, periodDate.Month, Math.Min(5 + index * 7, DateTime.DaysInMonth(periodDate.Year, periodDate.Month))).ToString("yyyy-MM-dd"),
-                    TaxableAmount = taxable,
-                    TaxPercent = taxPercent,
-                    TaxAmount = taxAmount,
-                    TotalAmount = taxable + taxAmount,
-                    PaymentType = index % 2 == 0 ? "bank" : "cash"
-                };
-            })
-            .ToList();
+        var monthStart = new DateTime(periodDate.Year, periodDate.Month, 1);
+        var monthEnd = monthStart.AddMonths(1);
 
-        if (seeded.Count > 0)
+        var normalizedCustomers = customers
+            .Where(c => !string.IsNullOrWhiteSpace(c.GstNumber))
+            .GroupBy(c => NormalizeCustomerName(c.Name), StringComparer.Ordinal)
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .ToDictionary(
+                group => group.Key,
+                group => group.First(),
+                StringComparer.Ordinal);
+
+        var invoices = await _db.ZohoInvoiceRecords
+            .AsNoTracking()
+            .Where(x => x.InvoiceDate.HasValue && x.InvoiceDate.Value >= monthStart && x.InvoiceDate.Value < monthEnd)
+            .OrderBy(x => x.InvoiceDate)
+            .ThenBy(x => x.InvoiceNumber)
+            .ToListAsync();
+
+        var result = new List<GstPurchaseSyncItem>();
+        foreach (var invoice in invoices)
         {
-            return seeded;
+            var normalizedName = NormalizeCustomerName(invoice.CustomerName);
+            if (string.IsNullOrWhiteSpace(normalizedName) || !normalizedCustomers.TryGetValue(normalizedName, out var customer))
+            {
+                continue;
+            }
+
+            var totalAmount = Math.Round(Math.Abs(invoice.Total), 2);
+            if (totalAmount <= 0)
+            {
+                continue;
+            }
+
+            result.Add(new GstPurchaseSyncItem
+            {
+                GstNumber = customer.GstNumber!.Trim().ToUpperInvariant(),
+                SupplierName = string.IsNullOrWhiteSpace(invoice.CustomerName) ? customer.Name : invoice.CustomerName.Trim(),
+                InvoiceNumber = string.IsNullOrWhiteSpace(invoice.InvoiceNumber) ? invoice.Id : invoice.InvoiceNumber.Trim(),
+                InvoiceDate = (invoice.InvoiceDate ?? monthStart).ToString("yyyy-MM-dd"),
+                TaxableAmount = totalAmount,
+                TaxPercent = 0m,
+                TaxAmount = 0m,
+                TotalAmount = totalAmount,
+                PaymentType = "bank"
+            });
         }
 
-        var defaultTaxable = 12000m;
-        var defaultTax = Math.Round(defaultTaxable * 0.18m, 2);
-        return
-        [
-            new GstPurchaseSyncItem
-            {
-                GstNumber = "33AAAAA0000A1Z5",
-                SupplierName = "Sample GST Supplier",
-                InvoiceNumber = $"GST-{periodDate:yyyyMM}-001",
-                InvoiceDate = new DateTime(periodDate.Year, periodDate.Month, 5).ToString("yyyy-MM-dd"),
-                TaxableAmount = defaultTaxable,
-                TaxPercent = 18m,
-                TaxAmount = defaultTax,
-                TotalAmount = defaultTaxable + defaultTax,
-                PaymentType = "bank"
-            }
-        ];
+        return result;
+    }
+
+    private static string NormalizeCustomerName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return string.Join(' ', value.Trim().ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 
     private async Task<string?> CreatePurchaseFromGstAsync(CustomerMaster customer, GstPurchaseSyncItem gst)

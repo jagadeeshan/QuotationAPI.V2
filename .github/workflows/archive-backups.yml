@@ -1,0 +1,145 @@
+name: Archive Old Backups to Git Repository
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run daily at 3:30 AM UTC (1 hour after backup completes)
+    - cron: "30 3 * * *"
+
+# Prevent concurrent archive jobs
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  archive-old-backups:
+    name: Archive Backups Older Than 30 Days
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      archived-count: ${{ steps.archive.outputs.archived_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install Git LFS
+        run: sudo apt-get install -y git-lfs
+
+      - name: Clone Archive Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.ARCHIVE_REPO || 'jagadeeshan/quotation-db-backups' }}
+          path: archive-repo
+          token: ${{ secrets.ARCHIVE_REPO_TOKEN }}
+          sparse-checkout: |
+            /*
+            !README.md
+
+      - name: Initialize Git LFS in Archive Repo
+        run: |
+          cd archive-repo
+          git lfs install
+          git lfs track "*.tar.gz"
+          git lfs track "*.sha256"
+
+      - name: Calculate cutoff date (30 days ago)
+        id: dates
+        run: |
+          CUTOFF_DATE=$(date -u -d '30 days ago' +'%Y-%m-%d')
+          echo "cutoff_date=$CUTOFF_DATE" >> "$GITHUB_OUTPUT"
+          echo "today=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Find and archive old backups
+        id: archive
+        run: |
+          cd archive-repo
+          
+          # Create year-month directories for current month
+          mkdir -p backups/$(date -u +'%Y-%m')
+          
+          ARCHIVED_COUNT=0
+          CUTOFF_DATE="${{ steps.dates.outputs.cutoff_date }}"
+          
+          # Check each year-month directory for backups older than 30 days
+          for dir in backups/*/; do
+            if [ -d "$dir" ]; then
+              dir_name=$(basename "$dir")
+              # Parse year-month from directory name
+              year_month=$(echo "$dir_name" | grep -E '^[0-9]{4}-[0-9]{2}$')
+              if [ -z "$year_month" ]; then
+                continue
+              fi
+              
+              # Get the first day of that month
+              month_start="${year_month}-01"
+              
+              # Compare with cutoff date
+              if [[ "$month_start" < "$CUTOFF_DATE" ]]; then
+                echo "Archiving directory: $dir_name (older than $CUTOFF_DATE)"
+                
+                # Create archive of the month
+                tar -czf "backups/${year_month}.tar.gz" -C backups "$dir_name"
+                
+                # Generate checksum
+                sha256sum "backups/${year_month}.tar.gz" > "backups/${year_month}.tar.gz.sha256"
+                
+                # Remove the original directory (we've archived it)
+                rm -rf "$dir"
+                
+                ARCHIVED_COUNT=$((ARCHIVED_COUNT + 1))
+              fi
+            fi
+          done
+          
+          echo "archived_count=$ARCHIVED_COUNT" >> "$GITHUB_OUTPUT"
+          
+          # List what will be committed
+          echo "=== Files to be committed ==="
+          find backups -type f \( -name "*.tar.gz" -o -name "*.sha256" \) | head -20
+
+      - name: Commit and Push Archives
+        run: |
+          cd archive-repo
+          
+          # Check if there are changes to commit
+          if git status --porcelain | grep -q .; then
+            echo "Changes detected, committing..."
+            
+            # Add all new files (including LFS)
+            git add -A
+            
+            # Check if anything is staged
+            if git diff --cached --name-only | grep -q .; then
+              COMMIT_MSG="Archive backups $(date -u +'%Y-%m-%d')"
+              
+              git commit -m "$COMMIT_MSG"
+              
+              # Push to archive repository
+              git push origin main
+              
+              echo "✓ Successfully pushed archives to Git repository"
+            else
+              echo "No files to commit (all backups within 30 days)"
+            fi
+          else
+            echo "No archives to push (no backups older than 30 days)"
+          fi
+
+  cleanup-archive-repo:
+    name: Clean Up Local Archive Clone
+    needs: archive-old-backups
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Clean up
+        run: |
+          rm -rf archive-repo
+          echo "Local archive clone cleaned up"

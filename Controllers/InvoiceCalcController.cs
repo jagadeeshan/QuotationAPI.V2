@@ -55,7 +55,7 @@ public class InvoiceCalcController : ControllerBase
             CompanyName = req.CompanyName,
             Description = req.Description,
             Amount = req.Amount,
-            DataJson = NormalizeCalculationDataJson(req.DataJson),
+            DataJson = NormalizeCalculationDataJson(req.DataJson, req.ForceNewItemIdentity),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             DeliveryDate = req.DeliveryDate
@@ -73,7 +73,7 @@ public class InvoiceCalcController : ControllerBase
         record.CompanyName = req.CompanyName;
         record.Description = req.Description;
         record.Amount = req.Amount;
-        record.DataJson = NormalizeCalculationDataJson(req.DataJson);
+        record.DataJson = NormalizeCalculationDataJson(req.DataJson, req.ForceNewItemIdentity);
         record.UpdatedAt = DateTime.UtcNow;
         record.DeliveryDate = req.DeliveryDate;
         await _db.SaveChangesAsync();
@@ -110,7 +110,7 @@ public class InvoiceCalcController : ControllerBase
         return Ok(clone);
     }
 
-    private static string NormalizeCalculationDataJson(string? dataJson)
+    private static string NormalizeCalculationDataJson(string? dataJson, bool forceNewItemIdentity = false)
     {
         if (string.IsNullOrWhiteSpace(dataJson))
         {
@@ -181,7 +181,9 @@ public class InvoiceCalcController : ControllerBase
             {
                 var canonicalKey = BuildCanonicalItemKey(customerId, customerName, itemName);
                 var existingId = ReadInt(itemNode, "itemId");
-                var stableId = existingId > 0 ? existingId : ComputeStableItemId(canonicalKey);
+                var stableId = forceNewItemIdentity
+                    ? ComputeStableItemId($"{canonicalKey}|{DateTime.UtcNow.Ticks}")
+                    : existingId > 0 ? existingId : ComputeStableItemId(canonicalKey);
 
                 itemNode["itemId"] = stableId;
                 itemNode["itemKey"] = canonicalKey;

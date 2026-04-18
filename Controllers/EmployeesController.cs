@@ -117,8 +117,30 @@ public class EmployeesController : ControllerBase
         return employeesById.TryGetValue(employeeId, out var employee) ? employee.MonthlySalary : 0m;
     }
 
+    private static decimal ResolveBasicPay(
+        string employeeId,
+        IReadOnlyDictionary<string, EmpEmployee> employeesById,
+        IReadOnlyDictionary<string, EmpSalaryMaster> salaryMastersByEmployeeId)
+    {
+        if (salaryMastersByEmployeeId.TryGetValue(employeeId, out var salaryMaster))
+        {
+            return Math.Max(0m, salaryMaster.BasicSalary);
+        }
+
+        return employeesById.TryGetValue(employeeId, out var employee) ? Math.Max(0m, employee.MonthlySalary) : 0m;
+    }
+
     private static decimal ResolveOtMultiplier(string employeeId, IReadOnlyDictionary<string, EmpSalaryMaster> salaryMastersByEmployeeId) =>
         salaryMastersByEmployeeId.TryGetValue(employeeId, out var salaryMaster) ? salaryMaster.OtMultiplier : 1m;
+
+    private static decimal ResolveOtBaseHourlyRate(
+        string employeeId,
+        IReadOnlyDictionary<string, EmpEmployee> employeesById,
+        IReadOnlyDictionary<string, EmpSalaryMaster> salaryMastersByEmployeeId)
+    {
+        var basicPay = ResolveBasicPay(employeeId, employeesById, salaryMastersByEmployeeId);
+        return basicPay / (DefaultMonthlyDivisorDays * WorkHoursPerDay);
+    }
 
     private static string NormalizeSalaryType(string? salaryType)
     {
@@ -212,9 +234,11 @@ public class EmployeesController : ControllerBase
         var otHours = CalculateOtHours(attendanceHours);
         var regularHours = Math.Min(attendanceHours, WorkHoursPerDay);
         var hourlyRate = ResolveHourlyRate(record.EmployeeId, employeesById, salaryMastersByEmployeeId);
-        var otRate = RoundMoney(hourlyRate * ResolveOtMultiplier(record.EmployeeId, salaryMastersByEmployeeId));
+        var otMultiplier = ResolveOtMultiplier(record.EmployeeId, salaryMastersByEmployeeId);
+        var otBaseHourlyRate = ResolveOtBaseHourlyRate(record.EmployeeId, employeesById, salaryMastersByEmployeeId);
+        var otRate = RoundMoney(otBaseHourlyRate * otMultiplier);
         var regularPay = RoundMoney(regularHours * hourlyRate);
-        var otPay = RoundMoney(otHours * otRate);
+        var otPay = RoundMoney(otBaseHourlyRate * otHours * otMultiplier);
 
         return new EmpAttendanceRecord
         {
@@ -543,6 +567,10 @@ public class EmployeesController : ControllerBase
     public async Task<IActionResult> CreateSalaryAdvance([FromBody] EmpSalaryAdvance advance)
     {
         advance.Id = Guid.NewGuid().ToString();
+        if (string.IsNullOrWhiteSpace(advance.PaymentMode))
+        {
+            advance.PaymentMode = "cash";
+        }
 
         _db.SalaryAdvances.Add(advance);
         await _db.SaveChangesAsync();
@@ -558,6 +586,7 @@ public class EmployeesController : ControllerBase
         advance.RequestDate = updated.RequestDate;
         advance.Reason = updated.Reason;
         advance.Status = updated.Status;
+        advance.PaymentMode = string.IsNullOrWhiteSpace(updated.PaymentMode) ? "cash" : updated.PaymentMode;
         await _db.SaveChangesAsync();
         return Ok(advance);
     }

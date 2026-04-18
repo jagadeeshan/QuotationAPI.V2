@@ -89,15 +89,20 @@ public class ItemsController : ControllerBase
             var nameAlias = BuildNameAlias(customerName, itemName);
             var idAlias = BuildIdAlias(customerId, itemName);
             var explicitId = ReadInt(itemRef, "itemId");
+            var explicitItemAlias = BuildExplicitItemAlias(explicitId);
             var generatedId = ComputeStableItemId(nameAlias);
             var itemId = explicitId > 0 ? explicitId : generatedId;
 
             var groupIndex = -1;
-            if (!string.IsNullOrWhiteSpace(idAlias) && groupAliases.TryGetValue(idAlias, out var byIdIndex))
+            if (!string.IsNullOrWhiteSpace(explicitItemAlias) && groupAliases.TryGetValue(explicitItemAlias, out var byExplicitItemIndex))
+            {
+                groupIndex = byExplicitItemIndex;
+            }
+            else if (explicitId <= 0 && !string.IsNullOrWhiteSpace(idAlias) && groupAliases.TryGetValue(idAlias, out var byIdIndex))
             {
                 groupIndex = byIdIndex;
             }
-            else if (groupAliases.TryGetValue(nameAlias, out var byNameIndex))
+            else if (explicitId <= 0 && groupAliases.TryGetValue(nameAlias, out var byNameIndex))
             {
                 groupIndex = byNameIndex;
             }
@@ -157,10 +162,18 @@ public class ItemsController : ControllerBase
                 }
             }
 
-            groupAliases[nameAlias] = groupIndex;
-            if (!string.IsNullOrWhiteSpace(idAlias))
+            if (!string.IsNullOrWhiteSpace(explicitItemAlias))
             {
-                groupAliases[idAlias] = groupIndex;
+                groupAliases[explicitItemAlias] = groupIndex;
+            }
+
+            if (explicitId <= 0)
+            {
+                groupAliases[nameAlias] = groupIndex;
+                if (!string.IsNullOrWhiteSpace(idAlias))
+                {
+                    groupAliases[idAlias] = groupIndex;
+                }
             }
 
             if (row.Source == "quotation")
@@ -251,6 +264,16 @@ public class ItemsController : ControllerBase
 
         var normalizedItemName = NormalizeToken(itemName);
         return $"id:{normalizedCustomerId}|item:{normalizedItemName}";
+    }
+
+    private static string? BuildExplicitItemAlias(int itemId)
+    {
+        if (itemId <= 0)
+        {
+            return null;
+        }
+
+        return $"itemid:{itemId}";
     }
 
     private static int ComputeStableItemId(string canonicalKey)

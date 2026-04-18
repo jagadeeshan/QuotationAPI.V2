@@ -1,5 +1,8 @@
 using System.Security.Claims;
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,12 +19,15 @@ public class AuthController : ControllerBase
     private readonly QuotationDbContext _db;
     private readonly ITokenService _tokenService;
     private readonly IConfiguration _configuration;
+    private readonly IHostEnvironment _environment;
+    private readonly PasswordHasher<AppUser> _passwordHasher = new();
 
-    public AuthController(QuotationDbContext db, ITokenService tokenService, IConfiguration configuration)
+    public AuthController(QuotationDbContext db, ITokenService tokenService, IConfiguration configuration, IHostEnvironment environment)
     {
         _db = db;
         _tokenService = tokenService;
         _configuration = configuration;
+        _environment = environment;
     }
 
     [HttpPost("login")]
@@ -39,7 +45,7 @@ public class AuthController : ControllerBase
             .ThenInclude(x => x.Role)
             .FirstOrDefaultAsync(x => x.Username == request.Username && x.IsActive);
 
-        if (user is null || user.PasswordHash != request.Password)
+        if (user is null || !VerifyAndUpgradePassword(user, request.Password))
         {
             return Unauthorized(new { message = "Invalid username or password" });
         }
@@ -49,11 +55,12 @@ public class AuthController : ControllerBase
 
         var roles = user.Roles.Select(x => x.Role?.Name ?? "User").ToList();
         var accessToken = _tokenService.CreateAccessToken(user, roles);
-        var refreshToken = _tokenService.CreateRefreshToken();
+        var refreshToken = _tokenService.CreateRefreshToken(user, roles);
+        await SaveRefreshTokenAsync(user.Id, refreshToken, HttpContext.Connection.RemoteIpAddress?.ToString());
 
         var response = new LoginResponse(
             accessToken,
-            refreshToken,
+            refreshToken.Token,
             3600,
             ToUserInfoDto(user)
         );
@@ -86,7 +93,7 @@ public class AuthController : ControllerBase
             Email = request.Email,
             FirstName = request.FirstName,
             LastName = request.LastName,
-            PasswordHash = request.Password,
+            PasswordHash = HashPassword(userData: null, request.Password),
             IsActive = true,
             LastLogin = DateTime.UtcNow,
             AccessStatus = "Pending",
@@ -98,12 +105,14 @@ public class AuthController : ControllerBase
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
 
-        var accessToken = _tokenService.CreateAccessToken(user, Array.Empty<string>());
-        var refreshToken = _tokenService.CreateRefreshToken();
+        var registrationRoles = Array.Empty<string>();
+        var accessToken = _tokenService.CreateAccessToken(user, registrationRoles);
+        var refreshToken = _tokenService.CreateRefreshToken(user, registrationRoles);
+        await SaveRefreshTokenAsync(user.Id, refreshToken, HttpContext.Connection.RemoteIpAddress?.ToString());
 
         return Ok(new LoginResponse(
             accessToken,
-            refreshToken,
+            refreshToken.Token,
             3600,
             ToUserInfoDto(user)
         ));
@@ -321,19 +330,96 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("refresh-token")]
-    public ActionResult<RefreshTokenResponse> RefreshToken([FromBody] RefreshTokenRequest request)
+    public async Task<ActionResult<RefreshTokenResponse>> RefreshToken([FromBody] RefreshTokenRequest request)
     {
         if (!ModelState.IsValid || string.IsNullOrWhiteSpace(request.RefreshToken))
         {
             return BadRequest(new { message = "Invalid refresh token" });
         }
 
-        return Ok(new RefreshTokenResponse(_tokenService.CreateRefreshToken(), 3600));
+        var principal = _tokenService.ValidateRefreshToken(request.RefreshToken);
+        if (principal == null)
+        {
+            return Unauthorized(new { message = "Refresh token is invalid or expired" });
+        }
+
+        var userId = principal.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? principal.FindFirstValue(ClaimTypes.NameIdentifier);
+        var tokenId = principal.FindFirstValue(JwtRegisteredClaimNames.Jti);
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return Unauthorized(new { message = "Refresh token does not contain user information" });
+        }
+
+        if (string.IsNullOrWhiteSpace(tokenId))
+        {
+            return Unauthorized(new { message = "Refresh token is missing token identifier" });
+        }
+
+        var storedToken = await _db.RefreshTokens
+            .FirstOrDefaultAsync(x => x.UserId == userId && x.TokenId == tokenId);
+
+        if (storedToken == null || storedToken.RevokedAt != null || storedToken.ExpiresAt <= DateTime.UtcNow)
+        {
+            return Unauthorized(new { message = "Refresh token is invalid or revoked" });
+        }
+
+        if (!string.Equals(storedToken.TokenHash, HashToken(request.RefreshToken), StringComparison.Ordinal))
+        {
+            storedToken.RevokedAt = DateTime.UtcNow;
+            storedToken.RevokedReason = "hash-mismatch";
+            await _db.SaveChangesAsync();
+            return Unauthorized(new { message = "Refresh token is invalid or revoked" });
+        }
+
+        var user = await _db.Users
+            .Include(x => x.Roles)
+            .ThenInclude(x => x.Role)
+            .FirstOrDefaultAsync(x => x.Id == userId && x.IsActive);
+
+        if (user == null)
+        {
+            return Unauthorized(new { message = "User not found or inactive" });
+        }
+
+        var roles = user.Roles.Select(x => x.Role?.Name ?? "User").ToList();
+        var accessToken = _tokenService.CreateAccessToken(user, roles);
+        var newRefreshToken = _tokenService.CreateRefreshToken(user, roles);
+        storedToken.RevokedAt = DateTime.UtcNow;
+        storedToken.LastUsedAt = DateTime.UtcNow;
+        storedToken.ReplacedByTokenId = newRefreshToken.TokenId;
+        storedToken.RevokedReason = "rotated";
+        await SaveRefreshTokenAsync(user.Id, newRefreshToken, HttpContext.Connection.RemoteIpAddress?.ToString(), saveChanges: false);
+        var accessExpiresSeconds = int.TryParse(_configuration["Jwt:AccessTokenMinutes"], out var minutes)
+            ? minutes * 60
+            : 3600;
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new RefreshTokenResponse(accessToken, newRefreshToken.Token, accessExpiresSeconds));
     }
 
     [HttpPost("logout")]
-    public IActionResult Logout()
+    public async Task<IActionResult> Logout([FromBody] RefreshTokenRequest? request)
     {
+        if (!string.IsNullOrWhiteSpace(request?.RefreshToken))
+        {
+            var principal = _tokenService.ValidateRefreshToken(request.RefreshToken);
+            var userId = principal?.FindFirstValue(JwtRegisteredClaimNames.Sub) ?? principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+            var tokenId = principal?.FindFirstValue(JwtRegisteredClaimNames.Jti);
+
+            if (!string.IsNullOrWhiteSpace(userId) && !string.IsNullOrWhiteSpace(tokenId))
+            {
+                var storedToken = await _db.RefreshTokens.FirstOrDefaultAsync(x => x.UserId == userId && x.TokenId == tokenId);
+                if (storedToken != null && storedToken.RevokedAt == null)
+                {
+                    storedToken.RevokedAt = DateTime.UtcNow;
+                    storedToken.RevokedReason = "logout";
+                    storedToken.LastUsedAt = DateTime.UtcNow;
+                    await _db.SaveChangesAsync();
+                }
+            }
+        }
+
         return Ok(new { message = "Logged out successfully" });
     }
 
@@ -363,9 +449,14 @@ public class AuthController : ControllerBase
 
         var adminUsername = _configuration["DefaultAdmin:Username"] ?? "admin";
         var adminEmail = _configuration["DefaultAdmin:Email"] ?? "admin@quotation.local";
-        var adminPassword = _configuration["DefaultAdmin:Password"] ?? "Admin@123";
+        var adminPassword = _configuration["DefaultAdmin:Password"];
         var adminFirstName = _configuration["DefaultAdmin:FirstName"] ?? "System";
         var adminLastName = _configuration["DefaultAdmin:LastName"] ?? "Administrator";
+
+        if (string.IsNullOrWhiteSpace(adminPassword) && _environment.IsDevelopment())
+        {
+            adminPassword = "Admin@123";
+        }
 
         var adminUser = await _db.Users
             .Include(x => x.Roles)
@@ -374,13 +465,18 @@ public class AuthController : ControllerBase
 
         if (adminUser == null)
         {
+            if (string.IsNullOrWhiteSpace(adminPassword))
+            {
+                return;
+            }
+
             adminUser = new AppUser
             {
                 Username = adminUsername,
                 Email = adminEmail,
                 FirstName = adminFirstName,
                 LastName = adminLastName,
-                PasswordHash = adminPassword,
+                PasswordHash = HashPassword(userData: null, adminPassword),
                 IsActive = true,
                 AccessStatus = "Approved",
                 LastLogin = null
@@ -413,6 +509,68 @@ public class AuthController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+    }
+
+    private string HashPassword(AppUser? userData, string password)
+    {
+        var user = userData ?? new AppUser();
+        return _passwordHasher.HashPassword(user, password);
+    }
+
+    private bool VerifyAndUpgradePassword(AppUser user, string providedPassword)
+    {
+        if (string.IsNullOrWhiteSpace(user.PasswordHash))
+        {
+            return false;
+        }
+
+        var verification = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, providedPassword);
+        if (verification == PasswordVerificationResult.Success || verification == PasswordVerificationResult.SuccessRehashNeeded)
+        {
+            if (verification == PasswordVerificationResult.SuccessRehashNeeded)
+            {
+                user.PasswordHash = HashPassword(user, providedPassword);
+            }
+
+            return true;
+        }
+
+        if (!LooksLikeHashedPassword(user.PasswordHash) && user.PasswordHash == providedPassword)
+        {
+            user.PasswordHash = HashPassword(user, providedPassword);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeHashedPassword(string passwordHash)
+    {
+        return passwordHash.StartsWith("AQAAAA", StringComparison.Ordinal);
+    }
+
+    private async Task SaveRefreshTokenAsync(string userId, RefreshTokenDescriptor refreshToken, string? ipAddress, bool saveChanges = true)
+    {
+        _db.RefreshTokens.Add(new AppRefreshToken
+        {
+            UserId = userId,
+            TokenId = refreshToken.TokenId,
+            TokenHash = HashToken(refreshToken.Token),
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = refreshToken.ExpiresAt,
+            CreatedByIp = ipAddress,
+        });
+
+        if (saveChanges)
+        {
+            await _db.SaveChangesAsync();
+        }
+    }
+
+    private static string HashToken(string token)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return Convert.ToHexString(bytes);
     }
 
     private static UserInfoDto ToUserInfoDto(AppUser user)

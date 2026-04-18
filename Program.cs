@@ -115,14 +115,9 @@ builder.Services.AddCors(options =>
 
         var defaultOrigins = new[]
         {
-            "http://localhost",
-            "http://localhost:7500",
-            "http://localhost:7501",
-            "http://localhost:7502",
             "http://localhost:4200",
             "http://localhost:4210",
             "https://magizhops.vercel.app",
-            "https://quotationapi-v2-chzo.onrender.com"
         };
 
         var allowedOrigins = configuredOrigins.Length > 0 ? configuredOrigins : defaultOrigins;
@@ -134,8 +129,8 @@ builder.Services.AddCors(options =>
         var allowedOriginPatterns = configuredOriginPatterns.Length > 0 ? configuredOriginPatterns : defaultOriginPatterns;
 
         policy.SetIsOriginAllowed(origin => IsCorsOriginAllowed(origin, allowedOrigins, allowedOriginPatterns))
-            .AllowAnyHeader()
-            .AllowAnyMethod();
+            .WithHeaders("Authorization", "Content-Type", "Accept", "X-Requested-With")
+            .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
     });
 });
 
@@ -228,7 +223,10 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "healthy",
     provider = databaseProvider,
-    database = isDatabaseConfigured ? "configured" : "NOT_CONFIGURED"
+    database = isDatabaseConfigured ? "configured" : "NOT_CONFIGURED",
+    migrationStatus = MigrationTracker.Status,
+    lastMigrationError = MigrationTracker.Error,
+    lastUpdatedUtc = MigrationTracker.LastUpdatedUtc
 }));
 app.MapControllers();
 
@@ -236,6 +234,10 @@ app.MapControllers();
 // immediately and Render does not cancel the deploy due to health check timeout.
 if (!isDatabaseConfigured)
 {
+    MigrationTracker.Status = "skipped";
+    MigrationTracker.Error = "No database connection configured";
+    MigrationTracker.LastUpdatedUtc = DateTime.UtcNow;
+    
     var noDB = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseMigration");
     noDB.LogWarning(
         "Skipping database migration — no valid connection string configured. "
@@ -251,6 +253,9 @@ _ = Task.Run(async () =>
     const int maxRetries = 5;
     for (int attempt = 1; attempt <= maxRetries; attempt++)
     {
+        MigrationTracker.Status = "running";
+        MigrationTracker.LastUpdatedUtc = DateTime.UtcNow;
+        
         try
         {
             using var scope = app.Services.CreateScope();
@@ -263,11 +268,17 @@ _ = Task.Run(async () =>
 
             logger.LogInformation("Database migration completed successfully.");
 
+            await EnsureRefreshTokenTableAsync(db);
             await EnsurePriceLovDefaultsAsync(db);
             await EnsureExpenseCategoryLovDefaultsAsync(db);
             await EnsureZohoBooksTablesAsync(db);
 
             logger.LogInformation("Database seeding completed successfully.");
+            
+            // Update status on success
+            MigrationTracker.Status = "succeeded";
+            MigrationTracker.Error = null;
+            MigrationTracker.LastUpdatedUtc = DateTime.UtcNow;
             return; // Success — exit retry loop.
         }
         catch (Exception ex)
@@ -309,6 +320,11 @@ _ = Task.Run(async () =>
             }
             else
             {
+                // Update status on final failure
+                MigrationTracker.Status = "failed";
+                MigrationTracker.Error = $"{ex.GetType().Name}: {ex.Message}";
+                MigrationTracker.LastUpdatedUtc = DateTime.UtcNow;
+                
                 logger.LogCritical(ex,
                     "Database migration failed after {MaxRetries} attempts. Source: {ConnectionSource}; Host: {Host}; Port: {Port}. "
                     + "The API will run but database may be in an inconsistent state. "
@@ -981,4 +997,59 @@ END;
 ";
 
     await db.Database.ExecuteSqlRawAsync(sql);
+}
+
+static async Task EnsureRefreshTokenTableAsync(QuotationDbContext db)
+{
+    var providerName = db.Database.ProviderName ?? string.Empty;
+    var sql = providerName.Contains("SqlServer", StringComparison.OrdinalIgnoreCase)
+        ? @"
+IF OBJECT_ID(N'[RefreshTokens]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [RefreshTokens] (
+        [Id] nvarchar(450) NOT NULL,
+        [UserId] nvarchar(450) NOT NULL,
+        [TokenId] nvarchar(128) NOT NULL,
+        [TokenHash] nvarchar(512) NOT NULL,
+        [CreatedAt] datetime2 NOT NULL,
+        [ExpiresAt] datetime2 NOT NULL,
+        [LastUsedAt] datetime2 NULL,
+        [RevokedAt] datetime2 NULL,
+        [ReplacedByTokenId] nvarchar(128) NULL,
+        [RevokedReason] nvarchar(64) NULL,
+        [CreatedByIp] nvarchar(256) NULL,
+        CONSTRAINT [PK_RefreshTokens] PRIMARY KEY ([Id]),
+        CONSTRAINT [FK_RefreshTokens_Users_UserId] FOREIGN KEY ([UserId]) REFERENCES [Users] ([Id]) ON DELETE CASCADE
+    );
+
+    CREATE UNIQUE INDEX [IX_RefreshTokens_TokenId] ON [RefreshTokens] ([TokenId]);
+    CREATE INDEX [IX_RefreshTokens_UserId] ON [RefreshTokens] ([UserId]);
+END"
+        : @"
+CREATE TABLE IF NOT EXISTS ""RefreshTokens"" (
+    ""Id"" text PRIMARY KEY,
+    ""UserId"" text NOT NULL REFERENCES ""Users""(""Id"") ON DELETE CASCADE,
+    ""TokenId"" character varying(128) NOT NULL,
+    ""TokenHash"" character varying(512) NOT NULL,
+    ""CreatedAt"" timestamp with time zone NOT NULL,
+    ""ExpiresAt"" timestamp with time zone NOT NULL,
+    ""LastUsedAt"" timestamp with time zone NULL,
+    ""RevokedAt"" timestamp with time zone NULL,
+    ""ReplacedByTokenId"" character varying(128) NULL,
+    ""RevokedReason"" character varying(64) NULL,
+    ""CreatedByIp"" character varying(256) NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ""IX_RefreshTokens_TokenId"" ON ""RefreshTokens"" (""TokenId"");
+CREATE INDEX IF NOT EXISTS ""IX_RefreshTokens_UserId"" ON ""RefreshTokens"" (""UserId"");";
+
+    await db.Database.ExecuteSqlRawAsync(sql);
+}
+
+
+// Migration status tracking for health endpoint observability
+public static class MigrationTracker
+{
+    public static string Status { get; set; } = "pending";
+    public static string? Error { get; set; }
+    public static DateTime? LastUpdatedUtc { get; set; }
 }

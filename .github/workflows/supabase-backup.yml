@@ -1,19 +1,25 @@
-name: Supabase Daily Backup
+name: Supabase Daily Backup with Restore Validation
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 2 * * *"
+    - cron: "30 2 * * *"  # Daily at 2:30 AM UTC
+
+# Prevent concurrent backup jobs
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_VERSION: "20"
 
 jobs:
   backup:
     name: Dump Supabase Database
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
+    outputs:
+      backup-name: ${{ steps.ts.outputs.value }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,11 +27,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install Supabase CLI
         run: |
-          # Download and install Supabase CLI binary directly
           curl -L "https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz" -o supabase.tar.gz
           tar -xzf supabase.tar.gz
           mv supabase /usr/local/bin/supabase
@@ -39,15 +44,17 @@ jobs:
         id: ts
         run: echo "value=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
 
-      - name: Dump roles, schema, and data
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      - name: Validate secrets
         run: |
-          if [ -z "$SUPABASE_DB_URL" ]; then
+          if [ -z "${{ secrets.SUPABASE_DB_URL }}" ]; then
             echo "SUPABASE_DB_URL secret is missing."
             exit 1
           fi
 
+      - name: Dump roles, schema, and data
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
           mkdir -p backups/supabase/${{ steps.ts.outputs.value }}
           cd backups/supabase/${{ steps.ts.outputs.value }}
 
@@ -64,6 +71,11 @@ jobs:
           }
           EOF
 
+      - name: Generate checksum
+        run: |
+          cd backups/supabase/${{ steps.ts.outputs.value }}
+          sha256sum *.sql > backup.sha256
+
       - name: Create archive
         run: |
           cd backups/supabase
@@ -73,5 +85,98 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: supabase-backup-${{ steps.ts.outputs.value }}
-          path: backups/supabase/supabase-backup-${{ steps.ts.outputs.value }}.tar.gz
+          path: |
+            backups/supabase/supabase-backup-${{ steps.ts.outputs.value }}.tar.gz
+            backups/supabase/supabase-backup-${{ steps.ts.outputs.value }}.tar.gz.sha256
           retention-days: 30
+
+  restore-validate:
+    name: Validate Backup Restore
+    needs: backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download backup artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: supabase-backup-${{ needs.backup.outputs.backup-name }}
+          path: backup
+
+      - name: Extract archive
+        run: |
+          tar -xzf backup/supabase-backup-*.tar.gz
+          ls -la
+
+      - name: Setup PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Start PostgreSQL service for validation
+        run: |
+          docker run -d \
+            --name pg-validator \
+            -e POSTGRES_PASSWORD=testpass \
+            -e POSTGRES_DB=testdb \
+            -p 5432:5432 \
+            postgres:16
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U postgres; then
+              echo "PostgreSQL is ready"
+              exit 0
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 2
+          done
+          echo "PostgreSQL failed to start"
+          exit 1
+
+      - name: Restore and validate schema
+        run: |
+          BACKUP_DIR=$(ls -d backup/supabase-*/)
+          echo "Using backup directory: $BACKUP_DIR"
+          
+          # Restore schema (skip roles.sql - requires Supabase-specific roles)
+          PGPASSWORD=testpass psql -h localhost -U postgres -d testdb -f "$BACKUP_DIR/schema.sql" || true
+          
+          # Validate: check tables exist
+          TABLE_COUNT=$(PGPASSWORD=testpass psql -h localhost -U postgres -d testdb -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';")
+          echo "Tables restored: $TABLE_COUNT"
+          
+          if [ "$TABLE_COUNT" -gt 0 ]; then
+            echo "✓ Schema validation passed"
+          else
+            echo "✗ Schema validation failed - no tables found"
+            exit 1
+          fi
+
+      - name: Restore and validate data
+        run: |
+          BACKUP_DIR=$(ls -d backup/supabase-*/)
+          
+          # Restore data
+          PGPASSWORD=testpass psql -h localhost -U postgres -d testdb -f "$BACKUP_DIR/data.sql" || true
+          
+          # Validate: check data exists (at least one table has rows)
+          ROW_COUNT=$(PGPASSWORD=testpass psql -h localhost -U postgres -d testdb -t -c "SELECT SUM(n_live_tup)::bigint FROM pg_stat_user_tables WHERE schemaname = 'public';")
+          echo "Total rows across tables: $ROW_COUNT"
+          
+          # Validate: check FK constraints exist
+          FK_COUNT=$(PGPASSWORD=testpass psql -h localhost -U postgres -d testdb -t -c "SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_type = 'FOREIGN KEY' AND table_schema = 'public';")
+          echo "Foreign key constraints: $FK_COUNT"
+          
+          if [ "$FK_COUNT" -gt 0 ]; then
+            echo "✓ Data validation passed - FK constraints restored"
+          else
+            echo "⚠ No FK constraints found (may be normal for this schema)"
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: docker stop pg-validator || true

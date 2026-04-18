@@ -80,5 +80,10 @@ If Render only injects a direct Supabase URL on port `5432`, the API automatical
 - Expected response: `{"status":"healthy"}`
 
 ## Notes
-- Update `ConnectionStrings:DefaultConnection` in appsettings files before first run.
+- Keep secrets out of tracked appsettings files. Set local and deployment secrets through environment variables or user-secrets instead:
+- `ConnectionStrings__DefaultConnection`
+- `Jwt__Key`
+- `ZohoBooks__ClientId`
+- `ZohoBooks__ClientSecret`
+- `DefaultAdmin__Password` if you want bootstrap admin creation on a fresh database
 - Use `dotnet ef migrations add <Name>` and `dotnet ef database update` when schema changes.
