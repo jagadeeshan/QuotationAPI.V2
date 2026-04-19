@@ -1,10 +1,14 @@
 name: Archive Old Backups to Git Repository
 
+# This workflow is superseded by the direct repo commit in supabase-backup.yml.
+# Kept here for reference but disabled — set to manual-only to prevent accidental runs.
 on:
   workflow_dispatch:
-  schedule:
-    # Run daily at 3:30 AM UTC (1 hour after backup completes)
-    - cron: "30 3 * * *"
+    inputs:
+      reason:
+        description: "Reason for manual run (this workflow is normally not needed)"
+        required: false
+        default: "Manual backfill"
 
 # Prevent concurrent archive jobs
 concurrency:

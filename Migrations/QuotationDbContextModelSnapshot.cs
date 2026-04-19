@@ -1313,6 +1313,11 @@ namespace QuotationAPI.V2.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("PaymentMode")
+                        .IsRequired()
+                        .HasDefaultValue("cash")
+                        .HasColumnType("text");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");

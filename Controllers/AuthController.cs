@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using QuotationAPI.V2.Data;
 using QuotationAPI.V2.Models.Auth;
+using QuotationAPI.V2.Models.Admin;
 using QuotationAPI.V2.Services;
 
 namespace QuotationAPI.V2.Controllers;
@@ -103,6 +104,20 @@ public class AuthController : ControllerBase
         };
 
         _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        // Sync to AdminUsers so the admin user-management panel can see this user
+        _db.AdminUsers.Add(new AdminUser
+        {
+            Id = user.Id,
+            Username = user.Username,
+            Email = user.Email,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Role = user.RequestedRoleName ?? "User",
+            Status = "inactive", // pending admin approval
+            CreatedAt = DateTime.UtcNow,
+        });
         await _db.SaveChangesAsync();
 
         var registrationRoles = Array.Empty<string>();
@@ -290,6 +305,30 @@ public class AuthController : ControllerBase
         user.AccessReviewNotes = string.IsNullOrWhiteSpace(request.Notes) ? "Approved" : request.Notes.Trim();
 
         await _db.SaveChangesAsync();
+
+        // Sync approval to AdminUsers table
+        var approvedAdminUser = await _db.AdminUsers.FindAsync(user.Id);
+        if (approvedAdminUser != null)
+        {
+            approvedAdminUser.Role = approvedRoleName;
+            approvedAdminUser.Status = "active";
+        }
+        else
+        {
+            _db.AdminUsers.Add(new AdminUser
+            {
+                Id = user.Id,
+                Username = user.Username,
+                Email = user.Email,
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                Role = approvedRoleName,
+                Status = "active",
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
+        await _db.SaveChangesAsync();
+
         return Ok(ToAccessRequestDto(user));
     }
 
@@ -326,6 +365,15 @@ public class AuthController : ControllerBase
         user.AccessReviewNotes = string.IsNullOrWhiteSpace(request.Notes) ? "Rejected" : request.Notes.Trim();
 
         await _db.SaveChangesAsync();
+
+        // Sync rejection to AdminUsers table
+        var rejectedAdminUser = await _db.AdminUsers.FindAsync(user.Id);
+        if (rejectedAdminUser != null)
+        {
+            rejectedAdminUser.Status = "inactive";
+            await _db.SaveChangesAsync();
+        }
+
         return Ok(ToAccessRequestDto(user));
     }
 
@@ -509,6 +557,30 @@ public class AuthController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+
+        // Sync default admin to AdminUsers table
+        var defaultAdminEntry = await _db.AdminUsers.FindAsync(adminUser.Id);
+        if (defaultAdminEntry == null)
+        {
+            _db.AdminUsers.Add(new AdminUser
+            {
+                Id = adminUser.Id,
+                Username = adminUser.Username,
+                Email = adminUser.Email,
+                FirstName = adminUser.FirstName,
+                LastName = adminUser.LastName,
+                Role = "Admin",
+                Status = "active",
+                CreatedAt = DateTime.UtcNow,
+            });
+            await _db.SaveChangesAsync();
+        }
+        else if (defaultAdminEntry.Status != "active" || defaultAdminEntry.Role != "Admin")
+        {
+            defaultAdminEntry.Status = "active";
+            defaultAdminEntry.Role = "Admin";
+            await _db.SaveChangesAsync();
+        }
     }
 
     private string HashPassword(AppUser? userData, string password)

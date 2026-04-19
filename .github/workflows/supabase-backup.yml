@@ -12,6 +12,10 @@ concurrency:
 
 env:
   NODE_VERSION: "20"
+  # Repo where backups are committed. Override with vars.BACKUP_REPO if needed.
+  BACKUP_REPO: ${{ vars.BACKUP_REPO || 'jagadeeshan/quotation-db-backups' }}
+  # How many daily backups to keep in the repo (older ones are pruned automatically)
+  KEEP_DAYS: "30"
 
 jobs:
   backup:
@@ -50,6 +54,10 @@ jobs:
             echo "SUPABASE_DB_URL secret is missing."
             exit 1
           fi
+          if [ -z "${{ secrets.BACKUP_REPO_TOKEN }}" ]; then
+            echo "BACKUP_REPO_TOKEN secret is missing."
+            exit 1
+          fi
 
       - name: Dump roles, schema, and data
         env:
@@ -81,14 +89,78 @@ jobs:
           cd backups/supabase
           tar -czf supabase-backup-${{ steps.ts.outputs.value }}.tar.gz ${{ steps.ts.outputs.value }}
 
-      - name: Upload backup artifact
+      # ── Commit backup directly to the backup repository ────────────────────
+      - name: Checkout backup repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.BACKUP_REPO }}
+          path: backup-repo
+          token: ${{ secrets.BACKUP_REPO_TOKEN }}
+
+      - name: Install Git LFS
+        run: sudo apt-get install -y git-lfs
+
+      - name: Configure Git LFS and copy backup
+        run: |
+          cd backup-repo
+          git lfs install
+          git lfs track "*.tar.gz"
+          git lfs track "*.sha256"
+          git add .gitattributes 2>/dev/null || true
+
+          # Organize by year-month
+          YEAR_MONTH=$(date -u +'%Y-%m')
+          mkdir -p "backups/${YEAR_MONTH}"
+
+          ARCHIVE="supabase-backup-${{ steps.ts.outputs.value }}.tar.gz"
+          cp "../backups/supabase/${ARCHIVE}" "backups/${YEAR_MONTH}/${ARCHIVE}"
+          sha256sum "backups/${YEAR_MONTH}/${ARCHIVE}" > "backups/${YEAR_MONTH}/${ARCHIVE}.sha256"
+
+      - name: Prune backups older than ${{ env.KEEP_DAYS }} days
+        run: |
+          cd backup-repo
+          CUTOFF=$(date -u -d "${{ env.KEEP_DAYS }} days ago" +'%Y%m%d')
+          PRUNED=0
+
+          # Find .tar.gz files and remove those whose timestamp is older than cutoff
+          find backups -name "supabase-backup-*.tar.gz" | while read -r f; do
+            TS=$(basename "$f" | grep -oP '(?<=supabase-backup-)\d{8}')
+            if [ -n "$TS" ] && [ "$TS" -lt "$CUTOFF" ]; then
+              echo "Pruning old backup: $f"
+              rm -f "$f" "${f}.sha256"
+              PRUNED=$((PRUNED + 1))
+            fi
+          done
+
+          # Remove empty year-month directories
+          find backups -type d -empty -delete 2>/dev/null || true
+
+          echo "Pruned $PRUNED backup(s) older than ${{ env.KEEP_DAYS }} days"
+
+      - name: Commit and push backup to repository
+        run: |
+          cd backup-repo
+          git config user.name "GitHub Actions Bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "chore: daily backup $(date -u +'%Y-%m-%d') [${{ steps.ts.outputs.value }}]"
+            git push origin main
+            echo "✓ Backup committed to ${{ env.BACKUP_REPO }}"
+          fi
+
+      # Keep artifact as a secondary short-lived copy (7 days)
+      - name: Upload backup artifact (short-term copy)
         uses: actions/upload-artifact@v4
         with:
           name: supabase-backup-${{ steps.ts.outputs.value }}
           path: |
             backups/supabase/supabase-backup-${{ steps.ts.outputs.value }}.tar.gz
-            backups/supabase/supabase-backup-${{ steps.ts.outputs.value }}.tar.gz.sha256
-          retention-days: 30
+          retention-days: 7
 
   restore-validate:
     name: Validate Backup Restore
