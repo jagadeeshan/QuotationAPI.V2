@@ -257,6 +257,33 @@ public class EmployeesController : ControllerBase
         };
     }
 
+    private async Task<EmpAttendanceRecord> UpsertAttendanceRecordAsync(EmpAttendanceRecord normalizedRecord, CancellationToken cancellationToken = default)
+    {
+        var existing = _db.AttendanceRecords.Local.FirstOrDefault(a =>
+                a.EmployeeId == normalizedRecord.EmployeeId && a.Date == normalizedRecord.Date)
+            ?? await _db.AttendanceRecords.FirstOrDefaultAsync(
+                a => a.EmployeeId == normalizedRecord.EmployeeId && a.Date == normalizedRecord.Date,
+                cancellationToken);
+
+        if (existing != null)
+        {
+            existing.Status = normalizedRecord.Status;
+            existing.AttendanceHours = normalizedRecord.AttendanceHours;
+            existing.OtHours = normalizedRecord.OtHours;
+            existing.HourlyRate = normalizedRecord.HourlyRate;
+            existing.OtRate = normalizedRecord.OtRate;
+            existing.RegularPay = normalizedRecord.RegularPay;
+            existing.OtPay = normalizedRecord.OtPay;
+            existing.TotalPay = normalizedRecord.TotalPay;
+            existing.Notes = normalizedRecord.Notes;
+            return existing;
+        }
+
+        normalizedRecord.Id = Guid.NewGuid().ToString();
+        _db.AttendanceRecords.Add(normalizedRecord);
+        return normalizedRecord;
+    }
+
     // ── Employees ──────────────────────────────────────────────────────────
 
     [HttpGet]
@@ -400,27 +427,57 @@ public class EmployeesController : ControllerBase
 
         var (employeesById, salaryMastersByEmployeeId) = await LoadAttendanceCalculationDataAsync();
         var normalizedRecord = NormalizeAttendanceRecord(record, employeesById, salaryMastersByEmployeeId);
-        
-        var existing = await _db.AttendanceRecords
-            .FirstOrDefaultAsync(a => a.EmployeeId == record.EmployeeId && a.Date == record.Date);
-        if (existing != null)
-        {
-            existing.Status = normalizedRecord.Status;
-            existing.AttendanceHours = normalizedRecord.AttendanceHours;
-            existing.OtHours = normalizedRecord.OtHours;
-            existing.HourlyRate = normalizedRecord.HourlyRate;
-            existing.OtRate = normalizedRecord.OtRate;
-            existing.RegularPay = normalizedRecord.RegularPay;
-            existing.OtPay = normalizedRecord.OtPay;
-            existing.TotalPay = normalizedRecord.TotalPay;
-            existing.Notes = normalizedRecord.Notes;
-            await _db.SaveChangesAsync();
-            return Ok(existing);
-        }
-        normalizedRecord.Id = Guid.NewGuid().ToString();
-        _db.AttendanceRecords.Add(normalizedRecord);
+        var savedRecord = await UpsertAttendanceRecordAsync(normalizedRecord);
         await _db.SaveChangesAsync();
-        return Ok(normalizedRecord);
+        return Ok(savedRecord);
+    }
+
+    [HttpPost("attendance/bulk")]
+    public async Task<IActionResult> MarkAttendanceBulk([FromBody] EmpAttendanceBulkUpsertRequest request)
+    {
+        if (request.Records == null || request.Records.Count == 0)
+        {
+            return BadRequest("Attendance records are required.");
+        }
+
+        var employeeIds = request.Records
+            .Select(record => record.EmployeeId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var employees = await _db.Employees
+            .AsNoTracking()
+            .Where(employee => employeeIds.Contains(employee.Id))
+            .ToDictionaryAsync(employee => employee.Id);
+
+        var (employeesById, salaryMastersByEmployeeId) = await LoadAttendanceCalculationDataAsync();
+        var savedRecords = new List<EmpAttendanceRecord>(request.Records.Count);
+
+        foreach (var record in request.Records)
+        {
+            if (!employees.TryGetValue(record.EmployeeId, out var employee))
+            {
+                return BadRequest($"Employee not found for attendance date {record.Date}.");
+            }
+
+            if (IsFutureDate(record.Date))
+            {
+                return BadRequest($"Future date attendance is not allowed for {record.Date}.");
+            }
+
+            if (IsBeforeJoiningDate(employee, record.Date))
+            {
+                return BadRequest($"Attendance before joining date is not allowed for {record.Date}.");
+            }
+
+            var normalizedRecord = NormalizeAttendanceRecord(record, employeesById, salaryMastersByEmployeeId);
+            var savedRecord = await UpsertAttendanceRecordAsync(normalizedRecord);
+            savedRecords.Add(savedRecord);
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(savedRecords);
     }
 
     [HttpDelete("attendance/{id}")]
@@ -587,6 +644,11 @@ public class EmployeesController : ControllerBase
         advance.Reason = updated.Reason;
         advance.Status = updated.Status;
         advance.PaymentMode = string.IsNullOrWhiteSpace(updated.PaymentMode) ? "cash" : updated.PaymentMode;
+        // Update ExpenseId if provided (links the advance to an expense record)
+        if (!string.IsNullOrWhiteSpace(updated.ExpenseId))
+        {
+            advance.ExpenseId = updated.ExpenseId;
+        }
         await _db.SaveChangesAsync();
         return Ok(advance);
     }
@@ -599,6 +661,16 @@ public class EmployeesController : ControllerBase
         advance.IsDeleted = true;
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    [HttpPatch("salary-advances/{id}/expense")]
+    public async Task<IActionResult> LinkExpenseToAdvance(string id, [FromBody] LinkExpenseRequest req)
+    {
+        var advance = await _db.SalaryAdvances.FindAsync(id);
+        if (advance == null) return NotFound();
+        advance.ExpenseId = req.ExpenseId;
+        await _db.SaveChangesAsync();
+        return Ok(advance);
     }
 
     // ── Monthly Salary Calculations ─────────────────────────────────────────

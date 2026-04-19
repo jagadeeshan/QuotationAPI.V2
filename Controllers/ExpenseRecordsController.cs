@@ -19,7 +19,11 @@ public class ExpenseRecordsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<ExpenseRecord>>> GetAll([FromQuery] string? category, [FromQuery] string? status)
+    public async Task<ActionResult<IEnumerable<ExpenseRecord>>> GetAll(
+        [FromQuery] string? category,
+        [FromQuery] string? status,
+        [FromQuery] string? sourceModule,
+        [FromQuery] string? sourceId)
     {
         var query = _db.ExpenseRecords.Where(x => !x.IsDeleted);
 
@@ -31,6 +35,16 @@ public class ExpenseRecordsController : ControllerBase
         if (!string.IsNullOrWhiteSpace(status))
         {
             query = query.Where(x => x.Status == status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceModule))
+        {
+            query = query.Where(x => x.SourceModule == sourceModule);
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceId))
+        {
+            query = query.Where(x => x.SourceId == sourceId);
         }
 
         var results = await query
@@ -76,9 +90,11 @@ public class ExpenseRecordsController : ControllerBase
             Amount = request.Amount,
             ExpenseDate = request.ExpenseDate,
             PaidBy = request.PaidBy,
-            PaymentMethod = request.PaymentMethod,
+            PaymentMethod = string.IsNullOrWhiteSpace(request.PaymentMethod) ? "cash" : request.PaymentMethod,
             Remarks = request.Remarks,
-            Status = request.Status,
+            Status = string.IsNullOrWhiteSpace(request.Status) ? "draft" : request.Status,
+            SourceModule = request.SourceModule,
+            SourceId = request.SourceId,
             CreatedAt = now,
             UpdatedAt = now
         };

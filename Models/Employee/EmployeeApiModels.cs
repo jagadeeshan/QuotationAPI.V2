@@ -31,6 +31,11 @@ public class EmpAttendanceRecord
     public bool IsDeleted { get; set; } = false;
 }
 
+public class EmpAttendanceBulkUpsertRequest
+{
+    public List<EmpAttendanceRecord> Records { get; set; } = [];
+}
+
 public class EmpHoliday
 {
     public string Id { get; set; } = "";
@@ -69,7 +74,13 @@ public class EmpSalaryAdvance
     public string Reason { get; set; } = "";
     public string Status { get; set; } = "requested";
     public string PaymentMode { get; set; } = "cash";
+    public string? ExpenseId { get; set; }  // Linked expense record ID
     public bool IsDeleted { get; set; } = false;
+}
+
+public class LinkExpenseRequest
+{
+    public string ExpenseId { get; set; } = "";
 }
 
 public class EmpMonthlySalaryCalc

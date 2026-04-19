@@ -5,8 +5,17 @@ name: API CI/CD (Render)
 # 2. Push to main or master branch
 on:
   workflow_dispatch:
+    inputs:
+      target_environment:
+        description: "Where to deploy"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
   push:
-    branches: [main, master]
+    branches: [develop, main, master]
 
 # Prevent concurrent deployments
 concurrency:
@@ -14,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: "20"
+  DOTNET_VERSION: "8.0.x"
 
 jobs:
   build:
@@ -27,29 +36,37 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore QuotationAPI.V2.csproj
 
       - name: Build
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build QuotationAPI.V2.csproj --configuration Release --no-restore
 
       - name: Publish
-        run: dotnet publish --configuration Release --no-build -o out
+        run: dotnet publish QuotationAPI.V2.csproj --configuration Release --no-build -o out
 
-  deploy:
-    name: Deploy to Render
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+  deploy-staging:
+    name: Deploy to Render (Staging)
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && github.event.inputs.target_environment == 'staging')
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: staging
     steps:
-      - name: Validate Render deploy hook
+      - name: Validate Render staging deploy hook
         run: |
-          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
-            echo "RENDER_DEPLOY_HOOK_URL is missing. Set it in GitHub repo Settings > Secrets and variables > Actions."
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL_STAGING }}" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL_STAGING is missing. Set it in GitHub repo Settings > Secrets and variables > Actions."
             exit 1
+          fi
+
+      - name: Ensure jq is available
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
           fi
 
       - name: Trigger deploy hook
@@ -58,16 +75,19 @@ jobs:
             --retry 3 \
             --retry-all-errors \
             --max-time 30 \
-            -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+            -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL_STAGING }}"
 
       - name: Wait for deployment and verify health
         run: |
           echo "Waiting for Render deployment to complete..."
           sleep 30
           
-          RENDER_URL="${{ secrets.RENDER_SERVICE_URL }}"
+          RENDER_URL="${{ secrets.RENDER_SERVICE_URL_STAGING }}"
           if [ -z "$RENDER_URL" ]; then
-            echo "RENDER_SERVICE_URL not set, skipping health check. Set this secret to enable verification."
+            RENDER_URL="${{ secrets.RENDER_SERVICE_URL }}"
+          fi
+          if [ -z "$RENDER_URL" ]; then
+            echo "RENDER_SERVICE_URL_STAGING (or fallback RENDER_SERVICE_URL) not set, skipping health check."
             exit 0
           fi
           
@@ -86,5 +106,64 @@ jobs:
             sleep 15
           done
           
+          echo "⚠ Health check timeout - deployment may still be in progress"
+          exit 0
+
+  deploy-production:
+    name: Deploy to Render (Production)
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) || (github.event_name == 'workflow_dispatch' && github.event.inputs.target_environment == 'production' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Validate Render production deploy hook
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL is missing. Set it in GitHub repo Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Ensure jq is available
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+
+      - name: Trigger production deploy hook
+        run: |
+          curl --fail --silent --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --max-time 30 \
+            -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+
+      - name: Wait for deployment and verify health
+        run: |
+          echo "Waiting for Render production deployment to complete..."
+          sleep 30
+
+          RENDER_URL="${{ secrets.RENDER_SERVICE_URL }}"
+          if [ -z "$RENDER_URL" ]; then
+            echo "RENDER_SERVICE_URL not set, skipping health check. Set this secret to enable verification."
+            exit 0
+          fi
+
+          echo "Polling health endpoint at $RENDER_URL/health..."
+          for i in {1..24}; do
+            STATUS=$(curl -s "$RENDER_URL/health" | jq -r '.migrationStatus // .status // empty' 2>/dev/null || echo "pending")
+            echo "Attempt $i/24: migrationStatus=$STATUS"
+
+            if [ "$STATUS" = "succeeded" ] || [ "$STATUS" = "healthy" ]; then
+              echo "✓ Deployment verified - migrations completed"
+              exit 0
+            elif [ "$STATUS" = "failed" ]; then
+              echo "✗ Deployment failed - migrations failed"
+              exit 1
+            fi
+            sleep 15
+          done
+
           echo "⚠ Health check timeout - deployment may still be in progress"
           exit 0
